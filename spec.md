@@ -110,7 +110,7 @@ Quorum is a commitment-driven event platform where organizers post potential eve
 | **Neon** | Postgres database | Serverless Postgres, free tier, branching. `us-east-1`. |
 | **Drizzle ORM** | Query builder & migrations | Type-safe, lightweight, Postgres-native, runs in Workers. |
 | **WorkOS** | Authentication | Google OAuth + magic link. No custom auth code. Handles SSO plumbing. |
-| **Resend** | Transactional email | Simple API, free tier (100 emails/day). Sending from `quorum.mechies.com`. |
+| **Resend** | Transactional email | Simple API, free tier (100 emails/day). Sending from `quorum.malamaconsulting.com`. |
 | **TypeScript** | Language | End-to-end type safety. |
 
 ---
@@ -137,7 +137,7 @@ Quorum is a commitment-driven event platform where organizers post potential eve
 - No automatic on-site registration tracking (V2 — organizer manually marks in V1).
 - No test suite until V1.1.
 - Free tiers for all services in V1.0.
-- Domain: `quorum.mechies.com`.
+- Domain: `quorum.malamaconsulting.com`.
 
 ---
 

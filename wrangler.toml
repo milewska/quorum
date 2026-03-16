@@ -1,4 +1,5 @@
 # Quorum — Cloudflare Pages + Workers config
+# Domain: quorum.malamaconsulting.com
 
 name = "quorum"
 compatibility_date = "2025-03-16"

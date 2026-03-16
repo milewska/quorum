@@ -26,12 +26,12 @@
 
 - Cloudflare API token (or login via `wrangler login`)
 - Neon connection string (project must exist)
-- WorkOS API key + Client ID (project must exist, Google OAuth connection configured, redirect URI set to `https://quorum.mechies.com/auth/callback`)
+- WorkOS API key + Client ID (project must exist, Google OAuth connection configured, redirect URI set to `https://quorum.malamaconsulting.com/auth/callback`)
 - Resend API key
 - GitHub access (push permission to `Milewska/quorum`)
-- DNS access: point `quorum.mechies.com` CNAME to Cloudflare Pages + add Resend verification records
+- DNS access: point `quorum.malamaconsulting.com` CNAME to Cloudflare Pages + add Resend verification records
 
-**Done when:** `https://quorum.mechies.com` serves a page, the DB has all tables, `git push` to `main` triggers auto-deploy, and all env vars are set in Cloudflare.
+**Done when:** `https://quorum.malamaconsulting.com` serves a page, the DB has all tables, `git push` to `main` triggers auto-deploy, and all env vars are set in Cloudflare.
 
 ---
 
@@ -224,4 +224,4 @@
 
 **Human input:** Logo / brand assets if available (otherwise ships with text placeholder).
 
-**Done when:** All pages render correctly on mobile and desktop, errors show friendly messages, emails look good, SEO tags are present, and a full end-to-end walkthrough (create → commit → quorum → confirm → complete) succeeds on production.
+**Done when:** All pages render correctly on mobile and desktop, errors show friendly messages, emails look good, SEO tags are present, and a full end-to-end walkthrough (create → commit → quorum → confirm → complete) succeeds on production at `quorum.malamaconsulting.com`.
