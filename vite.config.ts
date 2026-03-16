@@ -13,4 +13,8 @@ export default defineConfig({
     reactRouter(),
     tsconfigPaths(),
   ],
+  ssr: {
+    target: "webworker",
+    noExternal: true,
+  },
 });
