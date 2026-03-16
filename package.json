@@ -6,7 +6,7 @@
     "build": "react-router build",
     "dev": "react-router dev",
     "start": "wrangler pages dev ./build/client",
-    "deploy": "npm run build && wrangler pages deploy ./build/client",
+    "deploy": "npm run build && wrangler pages deploy build/client --project-name quorum",
     "typecheck": "react-router typegen && tsc",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
