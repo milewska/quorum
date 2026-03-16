@@ -127,6 +127,55 @@ a {
   background: var(--color-border);
 }
 
+.site-header__user {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-decoration: none;
+  color: var(--color-text);
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: 6px;
+  padding: 0.25rem 0.5rem;
+  transition: background 0.15s ease;
+}
+
+.site-header__user:hover {
+  background: var(--color-border);
+}
+
+.site-header__avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.site-header__avatar--initials {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.site-header__name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─── Navigation pending state ───────────────────────────────────────────── */
+#app[data-navigating] .site-main {
+  opacity: 0.6;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
 /* ─── Home page ──────────────────────────────────────────────────────────── */
 .home {
   display: flex;
