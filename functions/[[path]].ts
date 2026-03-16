@@ -11,7 +11,4 @@ import * as build from "../build/server/index.js";
 
 export const onRequest: PagesFunction<Env> = createPagesFunctionHandler({
   build,
-  getLoadContext(ctx) {
-    return { cloudflare: ctx };
-  },
 });
