@@ -15,6 +15,8 @@ import {
 import { redirect } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 
+// Structural type so helpers work in both loaders and actions
+
 /**
  * Must be called before any WorkOS function in a loader/action.
  * Safe to call multiple times per request — module-level state, always same values.
@@ -28,7 +30,9 @@ export function configureAuth(env: Env) {
   });
 }
 
-type AuthArgs = LoaderFunctionArgs & {
+type AuthArgs = {
+  request: Request;
+  params: Record<string, string | undefined>;
   context: { cloudflare: { env: Env } };
 };
 

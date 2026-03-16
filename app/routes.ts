@@ -7,4 +7,13 @@ export default [
   route("auth/login", "routes/auth.login.tsx"),
   route("auth/callback", "routes/auth.callback.tsx"),
   route("auth/logout", "routes/auth.logout.tsx"),
+
+  // Events
+  route("events", "routes/events._index.tsx"),
+  route("events/new", "routes/events.new.tsx"),
+  route("events/:id", "routes/events.$id.tsx"),
+  route("events/:id/edit", "routes/events.$id.edit.tsx"),
+
+  // R2 image proxy
+  route("images/*", "routes/images.$.tsx"),
 ] satisfies RouteConfig;
