@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Build output
+build/
+.cache/
+
+# Cloudflare / Wrangler
+.wrangler/
+
+# React Router generated types
+.react-router/
+
+# Environment variables — never commit real secrets
+.env
+.env.local
+.env.*.local
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/settings.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

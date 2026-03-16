@@ -1,0 +1,18 @@
+# Quorum — Cloudflare Pages + Workers config
+
+name = "quorum"
+compatibility_date = "2025-03-16"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = "./build/client"
+
+# R2 bucket for event cover images
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "quorum-images"
+
+# Secrets (set via `wrangler pages secret put <KEY>` or the CF dashboard):
+#   DATABASE_URL
+#   WORKOS_API_KEY
+#   WORKOS_CLIENT_ID
+#   RESEND_API_KEY
+#   SESSION_SECRET
