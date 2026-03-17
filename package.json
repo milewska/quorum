@@ -21,10 +21,10 @@
     "@workos-inc/authkit-react-router": "^0.10.0",
     "drizzle-orm": "^0.40.0",
     "isbot": "^5.1.27",
-    "mimetext": "^3.0.28",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router": "^7.5.0",
+    "resend": "^6.9.4",
     "ws": "^8.19.0"
   },
   "devDependencies": {

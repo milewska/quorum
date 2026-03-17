@@ -8,13 +8,9 @@ interface Env {
   WORKOS_API_KEY: string;
   WORKOS_CLIENT_ID: string;
   WORKOS_REDIRECT_URI: string;
+  RESEND_API_KEY: string;
   SESSION_SECRET: string;
-  // Sender address, e.g. "noreply@quorum.malamaconsulting.com"
-  EMAIL_FROM: string;
 
   // R2 bucket for event cover images
   IMAGES: R2Bucket;
-
-  // Cloudflare Email Routing send_email binding
-  EMAIL: SendEmail;
 }
