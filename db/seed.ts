@@ -13,12 +13,12 @@
 import "dotenv/config";
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import * as schema from "./schema";
 import { commitments, events, timeSlots, users } from "./schema";
 
-const sql = neon(process.env.DATABASE_URL!);
-const db = drizzle(sql, { schema });
+const neonSql = neon(process.env.DATABASE_URL!);
+const db = drizzle(neonSql, { schema });
 
 // ─── Sample organisers ────────────────────────────────────────────────────────
 // These are fake WorkOS IDs — they won't clash with real auth sessions,
