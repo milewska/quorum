@@ -451,7 +451,7 @@ export default function EventDetail() {
         {/* Cover image */}
         {event.imageKey && (
           <img
-            src={`/images/${event.imageKey}`}
+            src={event.imageKey.startsWith("https://") ? event.imageKey : `/images/${event.imageKey}`}
             alt={event.title}
             className="event-detail__image"
           />

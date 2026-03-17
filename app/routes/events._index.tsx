@@ -131,7 +131,7 @@ export default function EventsIndex() {
                   {ev.imageKey && (
                     <div className="event-card__img-wrap">
                       <img
-                        src={`/images/${ev.imageKey}`}
+                        src={ev.imageKey.startsWith("https://") ? ev.imageKey : `/images/${ev.imageKey}`}
                         alt={ev.title}
                         className="event-card__img"
                       />

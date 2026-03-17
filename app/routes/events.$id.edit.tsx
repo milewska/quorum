@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { requireUser } from "~/auth.server";
 import { getEnv } from "~/env.server";
 import { getDb } from "../../db";
-import { events, timeSlots, users } from "../../db/schema";
+import { commitments, events, timeSlots, users } from "../../db/schema";
 import type { Route } from "./+types/events.$id.edit";
 import { SlotPicker } from "~/components/SlotPicker";
 import { CostTierEditor } from "~/components/CostTierEditor";
@@ -70,6 +70,15 @@ export async function action(args: Route.ActionArgs) {
 
   const fd = await args.request.formData();
   const intent = (fd.get("intent") as string) ?? "save";
+
+  // ── Delete ────────────────────────────────────────────────────────────────
+  if (intent === "delete") {
+    await db.delete(commitments).where(eq(commitments.eventId, params.id));
+    await db.delete(timeSlots).where(eq(timeSlots.eventId, params.id));
+    await db.delete(events).where(eq(events.id, params.id));
+    return redirect("/events");
+  }
+
   const title = ((fd.get("title") as string) ?? "").trim();
   const description = ((fd.get("description") as string) ?? "").trim();
   const location = ((fd.get("location") as string) ?? "").trim();
@@ -376,7 +385,7 @@ export default function EditEvent() {
             <legend className="form-section__legend">Cover Image</legend>
             {event.imageKey && (
               <img
-                src={`/images/${event.imageKey}`}
+                src={event.imageKey.startsWith("https://") ? event.imageKey : `/images/${event.imageKey}`}
                 alt="Current cover"
                 className="field__img-preview"
               />
@@ -459,6 +468,20 @@ export default function EditEvent() {
 
           {/* ── Actions ── */}
           <div className="form-actions">
+            <button
+              type="submit"
+              name="intent"
+              value="delete"
+              className="btn btn--danger"
+              disabled={busy}
+              onClick={(e) => {
+                if (!window.confirm("Delete this event? This cannot be undone.")) {
+                  e.preventDefault();
+                }
+              }}
+            >
+              Delete event
+            </button>
             <Link to={`/events/${event.id}`} className="btn btn--ghost">
               Cancel
             </Link>
