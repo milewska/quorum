@@ -118,6 +118,7 @@ async function main() {
     deadlineDays: number;
     visibility: "public" | "private";
     costTiersJson: string | null;
+    priceQuorumCents: number | null;
     slots: Array<{ startDays: number; startHour: number; endHour: number; endMinute?: number }>;
   }> = [
     {
@@ -129,11 +130,12 @@ async function main() {
       threshold: 20,
       deadlineDays: 18,
       visibility: "public",
-      // Tiered: General ($15) and VIP ($30)
+      // Tiered: General ($15) and VIP ($30) — price quorum: $450
       costTiersJson: JSON.stringify([
         { label: "General Admission", amount: 1500 },
         { label: "VIP (front row + drink)", amount: 3000 },
       ]),
+      priceQuorumCents: 45000, // $450 target
       slots: [
         { startDays: 21, startHour: 19, endHour: 22 },
         { startDays: 28, startHour: 19, endHour: 22 },
@@ -150,6 +152,7 @@ async function main() {
       visibility: "public",
       // Free
       costTiersJson: null,
+      priceQuorumCents: null,
       slots: [
         { startDays: 12, startHour: 7, endHour: 8, endMinute: 30 },
         { startDays: 14, startHour: 7, endHour: 8, endMinute: 30 },
@@ -164,10 +167,11 @@ async function main() {
       threshold: 25,
       deadlineDays: 22,
       visibility: "public",
-      // Fixed single price: $12
+      // Fixed single price: $12 — price quorum: $300
       costTiersJson: JSON.stringify([
         { label: "Admission", amount: 1200 },
       ]),
+      priceQuorumCents: 30000, // $300 target
       slots: [
         { startDays: 25, startHour: 18, endHour: 21, endMinute: 30 },
         { startDays: 32, startHour: 18, endHour: 21, endMinute: 30 },
@@ -184,6 +188,7 @@ async function main() {
       visibility: "public",
       // Free
       costTiersJson: null,
+      priceQuorumCents: null,
       slots: [
         { startDays: 16, startHour: 5, endHour: 10 },
         { startDays: 23, startHour: 5, endHour: 10 },
@@ -204,6 +209,7 @@ async function main() {
         { label: "General", amount: 3500 },
         { label: "Supporter", amount: 5000 },
       ]),
+      priceQuorumCents: null, // headcount quorum for this one
       slots: [
         { startDays: 35, startHour: 13, endHour: 17 },
       ],
@@ -219,6 +225,7 @@ async function main() {
       visibility: "public",
       // Free
       costTiersJson: null,
+      priceQuorumCents: null,
       slots: [
         { startDays: 10, startHour: 17, endHour: 20, endMinute: 30 },
       ],
@@ -240,6 +247,7 @@ async function main() {
         visibility: ev.visibility,
         status: "active",
         costTiersJson: ev.costTiersJson,
+        priceQuorumCents: ev.priceQuorumCents,
       })
       .returning({ id: events.id });
 

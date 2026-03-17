@@ -67,6 +67,9 @@ export const events = pgTable("events", {
   registrationUrl: text("registration_url"),
   // JSON array of { label: string, amount: number (cents, 0=free) }. Null = free event.
   costTiersJson: text("cost_tiers_json"),
+  // When set, quorum is determined by total pledged $ amount instead of headcount.
+  // Null = headcount quorum (threshold). Non-null = price quorum (cents target).
+  priceQuorumCents: integer("price_quorum_cents"),
   status: eventStatusEnum("status").notNull().default("draft"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

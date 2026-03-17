@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql as drizzleSql } from "drizzle-orm";
 import { Link, redirect, useFetcher, useLoaderData } from "react-router";
 import { useState } from "react";
 import { getOptionalUser, requireUser } from "~/auth.server";
@@ -97,6 +97,21 @@ export async function loader(args: Route.LoaderArgs) {
     ? (JSON.parse(row.event.costTiersJson) as CostTier[])
     : [];
 
+  // Aggregate total pledged cents per slot (for price quorum display)
+  const pledgedRows = row.event.priceQuorumCents != null
+    ? await db
+        .select({
+          slotId: commitments.timeSlotId,
+          totalCents: drizzleSql<number>`coalesce(sum(${commitments.tierAmount}), 0)`,
+        })
+        .from(commitments)
+        .where(and(eq(commitments.eventId, params.id), isNull(commitments.withdrawnAt)))
+        .groupBy(commitments.timeSlotId)
+    : [];
+  const pledgedBySlotId: Record<string, number> = Object.fromEntries(
+    pledgedRows.map((r) => [r.slotId, r.totalCents])
+  );
+
   return {
     event: row.event,
     organizerName: row.organizerName,
@@ -107,6 +122,7 @@ export async function loader(args: Route.LoaderArgs) {
     myCommittedSlotIds,
     myTierBySlotId,
     costTiers,
+    pledgedBySlotId,
   };
 }
 
@@ -363,6 +379,7 @@ export default function EventDetail() {
     myCommittedSlotIds,
     myTierBySlotId,
     costTiers,
+    pledgedBySlotId,
   } = useLoaderData<typeof loader>();
 
   const deadlineDate = new Date(event.deadline);
@@ -455,10 +472,14 @@ export default function EventDetail() {
           ) : (
             <ul className="slot-list">
               {slots.map((slot) => {
-                const pct = Math.min(
-                  100,
-                  (slot.commitmentCount / event.threshold) * 100
-                );
+                const isPriceQuorum = event.priceQuorumCents != null;
+                const pledgedCents = pledgedBySlotId[slot.id] ?? 0;
+                const pct = isPriceQuorum
+                  ? Math.min(100, (pledgedCents / event.priceQuorumCents!) * 100)
+                  : Math.min(100, (slot.commitmentCount / event.threshold) * 100);
+                const progressLabel = isPriceQuorum
+                  ? `$${(pledgedCents / 100).toFixed(0)} of $${(event.priceQuorumCents! / 100).toFixed(0)} pledged`
+                  : `${slot.commitmentCount} / ${event.threshold} committed`;
                 const slotParticipants = bySlot[slot.id] ?? [];
                 const committed = myCommittedSlotIds.includes(slot.id);
                 return (
@@ -495,7 +516,7 @@ export default function EventDetail() {
                         />
                       </div>
                       <span className="slot-card__count">
-                        {slot.commitmentCount} / {event.threshold} committed
+                        {progressLabel}
                       </span>
                     </div>
 

@@ -1412,6 +1412,27 @@ a {
   margin-top: 0.875rem;
 }
 
+/* ── Price quorum ── */
+.price-quorum-toggle {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.price-quorum-input {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  max-width: 280px;
+}
+
+.field__hint {
+  font-size: 0.8125rem;
+  color: var(--color-muted);
+  font-style: italic;
+}
+
 .tier-row {
   display: grid;
   grid-template-columns: 1fr auto auto;

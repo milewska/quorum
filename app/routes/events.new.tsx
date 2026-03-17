@@ -53,6 +53,7 @@ export async function action(args: Route.ActionArgs) {
   const deadlineStr = (fd.get("deadline") as string) ?? "";
   const slotsStr = (fd.get("slots") as string) ?? "[]";
   const costTiersStr = (fd.get("costTiers") as string) ?? "[]";
+  const priceQuorumStr = (fd.get("priceQuorumCents") as string) ?? "";
   const imageFile = fd.get("image") as File | null;
 
   let slots: SlotInput[] = [];
@@ -60,6 +61,13 @@ export async function action(args: Route.ActionArgs) {
 
   let costTiers: CostTier[] = [];
   try { costTiers = JSON.parse(costTiersStr); } catch {}
+
+  // priceQuorumCents: only valid when paid tiers exist and a positive $ amount was entered
+  let priceQuorumCents: number | null = null;
+  if (priceQuorumStr && costTiers.length > 0) {
+    const dollars = parseFloat(priceQuorumStr);
+    if (!isNaN(dollars) && dollars > 0) priceQuorumCents = Math.round(dollars * 100);
+  }
 
   // ── Validate ──────────────────────────────────────────────────────────────
   const errors: Errors = {};
@@ -118,6 +126,10 @@ export async function action(args: Route.ActionArgs) {
       break;
     }
   }
+  if (priceQuorumStr && costTiers.length === 0)
+    errors.costTiers = "Price quorum requires at least one paid tier.";
+  if (priceQuorumStr && priceQuorumCents === null)
+    errors.priceQuorum = "Enter a valid target amount greater than $0.";
 
   if (Object.keys(errors).length > 0) {
     return {
@@ -131,6 +143,7 @@ export async function action(args: Route.ActionArgs) {
         deadlineStr,
         slots,
         costTiers,
+        priceQuorumStr,
       },
     };
   }
@@ -169,6 +182,7 @@ export async function action(args: Route.ActionArgs) {
       deadline,
       imageKey,
       costTiersJson: costTiers.length > 0 ? JSON.stringify(costTiers) : null,
+      priceQuorumCents,
       status: status as "active" | "draft",
     })
     .returning({ id: events.id });
@@ -202,6 +216,12 @@ export default function NewEvent() {
 
   const [slots, setSlots] = useState<SlotInput[]>(vals?.slots ?? []);
   const [costTiers, setCostTiers] = useState<CostTier[]>(vals?.costTiers ?? []);
+  const [priceQuorumEnabled, setPriceQuorumEnabled] = useState(
+    !!(vals?.priceQuorumStr)
+  );
+  const [priceQuorumDollars, setPriceQuorumDollars] = useState(
+    vals?.priceQuorumStr ?? ""
+  );
 
   return (
     <section className="page-section">
@@ -358,7 +378,56 @@ export default function NewEvent() {
           <fieldset className="form-section">
             <legend className="form-section__legend">Pricing</legend>
             {errors.costTiers && <p className="field__error">{errors.costTiers}</p>}
-            <CostTierEditor tiers={costTiers} onChange={setCostTiers} />
+            <CostTierEditor
+              tiers={costTiers}
+              onChange={(t) => {
+                setCostTiers(t);
+                if (t.length === 0) setPriceQuorumEnabled(false);
+              }}
+            />
+            {costTiers.length > 0 && (
+              <div className="price-quorum-toggle">
+                <label className="radio-option">
+                  <input
+                    type="checkbox"
+                    checked={priceQuorumEnabled}
+                    onChange={(e) => {
+                      setPriceQuorumEnabled(e.target.checked);
+                      if (!e.target.checked) setPriceQuorumDollars("");
+                    }}
+                  />
+                  Use price quorum — set a revenue target instead of a headcount
+                </label>
+                {priceQuorumEnabled && (
+                  <div className="price-quorum-input">
+                    <label className="field__label" htmlFor="priceQuorumCents">
+                      Target amount
+                    </label>
+                    <div className="tier-row__amount-wrap">
+                      <span className="tier-row__currency">$</span>
+                      <input
+                        id="priceQuorumCents"
+                        name="priceQuorumCents"
+                        type="number"
+                        min={1}
+                        step="0.01"
+                        className="field__input tier-row__amount-input"
+                        placeholder="e.g. 500.00"
+                        value={priceQuorumDollars}
+                        onChange={(e) => setPriceQuorumDollars(e.target.value)}
+                      />
+                    </div>
+                    {errors.priceQuorum && (
+                      <p className="field__error">{errors.priceQuorum}</p>
+                    )}
+                    <p className="field__hint">
+                      Quorum is reached when total pledged amount meets this target.
+                      The headcount threshold above is ignored.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
           </fieldset>
 
           {/* ── Actions ── */}

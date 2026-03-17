@@ -15,6 +15,13 @@
       "when": 1773787259062,
       "tag": "0001_cost_tiers",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1773873659062,
+      "tag": "0002_price_quorum",
+      "breakpoints": true
     }
   ]
 }

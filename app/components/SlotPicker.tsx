@@ -124,6 +124,18 @@ export function SlotPicker({ slots, onChange }: SlotPickerProps) {
   const [durationBlocks, setDuration]   = useState(2); // default 1 hr
   const [hoverCell, setHoverCell]       = useState<{ col: number; row: number } | null>(null);
 
+  function handleDurationChange(newBlocks: number) {
+    setDuration(newBlocks);
+    // Remap all existing slots to the new duration
+    if (slots.length > 0) {
+      onChange(slots.map((s) => {
+        const start = new Date(s.startsAt);
+        const end = new Date(start.getTime() + newBlocks * 30 * 60 * 1000);
+        return { startsAt: s.startsAt, endsAt: toLocalISO(end) };
+      }));
+    }
+  }
+
   const days    = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const cellMap = buildCellMap(slots, weekStart);
 
@@ -177,7 +189,7 @@ export function SlotPicker({ slots, onChange }: SlotPickerProps) {
             id="sp-duration"
             className="field__input slot-picker__duration-select"
             value={durationBlocks}
-            onChange={(e) => setDuration(Number(e.target.value))}
+            onChange={(e) => handleDurationChange(Number(e.target.value))}
           >
             {DURATION_OPTIONS.map(([label, blocks]) => (
               <option key={blocks} value={blocks}>{label}</option>
