@@ -6,6 +6,10 @@ import { getEnv } from "~/env.server";
 import { getDb } from "../../db";
 import { events, timeSlots, users } from "../../db/schema";
 import type { Route } from "./+types/events.new";
+import { SlotPicker } from "~/components/SlotPicker";
+import { CostTierEditor } from "~/components/CostTierEditor";
+import type { CostTier } from "~/components/CostTierEditor";
+import type { SlotInput } from "~/components/SlotPicker";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -15,6 +19,15 @@ function nowPlus(days: number) {
   return d.toISOString().slice(0, 16); // "YYYY-MM-DDTHH:mm"
 }
 
+function pad(n: number) {
+  return String(n).padStart(2, "0");
+}
+
+/** Local-time "YYYY-MM-DDTHH:mm" → Date */
+function parseLocalISO(s: string): Date {
+  return new Date(s); // browsers parse without-tz as local time
+}
+
 // ─── Server ───────────────────────────────────────────────────────────────────
 
 export async function loader(args: Route.LoaderArgs) {
@@ -22,7 +35,6 @@ export async function loader(args: Route.LoaderArgs) {
   return null;
 }
 
-type SlotInput = { startsAt: string; endsAt: string };
 type Errors = Record<string, string>;
 
 export async function action(args: Route.ActionArgs) {
@@ -40,12 +52,14 @@ export async function action(args: Route.ActionArgs) {
   const thresholdStr = (fd.get("threshold") as string) ?? "";
   const deadlineStr = (fd.get("deadline") as string) ?? "";
   const slotsStr = (fd.get("slots") as string) ?? "[]";
+  const costTiersStr = (fd.get("costTiers") as string) ?? "[]";
   const imageFile = fd.get("image") as File | null;
 
   let slots: SlotInput[] = [];
-  try {
-    slots = JSON.parse(slotsStr);
-  } catch {}
+  try { slots = JSON.parse(slotsStr); } catch {}
+
+  let costTiers: CostTier[] = [];
+  try { costTiers = JSON.parse(costTiersStr); } catch {}
 
   // ── Validate ──────────────────────────────────────────────────────────────
   const errors: Errors = {};
@@ -93,6 +107,18 @@ export async function action(args: Route.ActionArgs) {
     }
   }
 
+  // Validate cost tiers
+  for (let i = 0; i < costTiers.length; i++) {
+    if (!costTiers[i].label.trim()) {
+      errors.costTiers = `Tier ${i + 1}: label is required.`;
+      break;
+    }
+    if (costTiers[i].amount < 0) {
+      errors.costTiers = `Tier ${i + 1}: amount cannot be negative.`;
+      break;
+    }
+  }
+
   if (Object.keys(errors).length > 0) {
     return {
       errors,
@@ -104,6 +130,7 @@ export async function action(args: Route.ActionArgs) {
         thresholdStr,
         deadlineStr,
         slots,
+        costTiers,
       },
     };
   }
@@ -141,6 +168,7 @@ export async function action(args: Route.ActionArgs) {
       threshold,
       deadline,
       imageKey,
+      costTiersJson: costTiers.length > 0 ? JSON.stringify(costTiers) : null,
       status: status as "active" | "draft",
     })
     .returning({ id: events.id });
@@ -172,18 +200,8 @@ export default function NewEvent() {
   const navigation = useNavigation();
   const busy = navigation.state !== "idle";
 
-  const [slots, setSlots] = useState<SlotInput[]>(
-    vals?.slots ?? [{ startsAt: "", endsAt: "" }]
-  );
-
-  const addSlot = () =>
-    setSlots((prev) => [...prev, { startsAt: "", endsAt: "" }]);
-  const removeSlot = (i: number) =>
-    setSlots((prev) => prev.filter((_, idx) => idx !== i));
-  const updateSlot = (i: number, field: keyof SlotInput, value: string) =>
-    setSlots((prev) =>
-      prev.map((s, idx) => (idx === i ? { ...s, [field]: value } : s))
-    );
+  const [slots, setSlots] = useState<SlotInput[]>(vals?.slots ?? []);
+  const [costTiers, setCostTiers] = useState<CostTier[]>(vals?.costTiers ?? []);
 
   return (
     <section className="page-section">
@@ -192,6 +210,7 @@ export default function NewEvent() {
 
         <Form method="post" encType="multipart/form-data" className="event-form">
           <input type="hidden" name="slots" value={JSON.stringify(slots)} />
+          <input type="hidden" name="costTiers" value={JSON.stringify(costTiers)} />
 
           {/* ── Details ── */}
           <fieldset className="form-section">
@@ -332,44 +351,14 @@ export default function NewEvent() {
           <fieldset className="form-section">
             <legend className="form-section__legend">Time Slots</legend>
             {errors.slots && <p className="field__error">{errors.slots}</p>}
-            {slots.map((slot, i) => (
-              <div key={i} className="slot-row">
-                <div className="field">
-                  <label className="field__label">Start</label>
-                  <input
-                    type="datetime-local"
-                    className="field__input"
-                    value={slot.startsAt}
-                    onChange={(e) => updateSlot(i, "startsAt", e.target.value)}
-                  />
-                </div>
-                <div className="field">
-                  <label className="field__label">End</label>
-                  <input
-                    type="datetime-local"
-                    className="field__input"
-                    value={slot.endsAt}
-                    onChange={(e) => updateSlot(i, "endsAt", e.target.value)}
-                  />
-                </div>
-                {slots.length > 1 && (
-                  <button
-                    type="button"
-                    className="btn btn--ghost btn--sm"
-                    onClick={() => removeSlot(i)}
-                  >
-                    Remove
-                  </button>
-                )}
-              </div>
-            ))}
-            <button
-              type="button"
-              className="btn btn--ghost btn--sm"
-              onClick={addSlot}
-            >
-              + Add time slot
-            </button>
+            <SlotPicker slots={slots} onChange={setSlots} />
+          </fieldset>
+
+          {/* ── Pricing ── */}
+          <fieldset className="form-section">
+            <legend className="form-section__legend">Pricing</legend>
+            {errors.costTiers && <p className="field__error">{errors.costTiers}</p>}
+            <CostTierEditor tiers={costTiers} onChange={setCostTiers} />
           </fieldset>
 
           {/* ── Actions ── */}

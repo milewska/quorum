@@ -6,6 +6,10 @@ import { getEnv } from "~/env.server";
 import { getDb } from "../../db";
 import { events, timeSlots, users } from "../../db/schema";
 import type { Route } from "./+types/events.$id.edit";
+import { SlotPicker } from "~/components/SlotPicker";
+import { CostTierEditor } from "~/components/CostTierEditor";
+import type { CostTier } from "~/components/CostTierEditor";
+import type { SlotInput } from "~/components/SlotPicker";
 
 // ─── Server ───────────────────────────────────────────────────────────────────
 
@@ -39,7 +43,6 @@ export async function loader(args: Route.LoaderArgs) {
   return { event, slots };
 }
 
-type SlotInput = { startsAt: string; endsAt: string };
 type Errors = Record<string, string>;
 
 export async function action(args: Route.ActionArgs) {
@@ -75,12 +78,14 @@ export async function action(args: Route.ActionArgs) {
   const thresholdStr = (fd.get("threshold") as string) ?? "";
   const deadlineStr = (fd.get("deadline") as string) ?? "";
   const slotsStr = (fd.get("slots") as string) ?? "[]";
+  const costTiersStr = (fd.get("costTiers") as string) ?? "[]";
   const imageFile = fd.get("image") as File | null;
 
   let slots: SlotInput[] = [];
-  try {
-    slots = JSON.parse(slotsStr);
-  } catch {}
+  try { slots = JSON.parse(slotsStr); } catch {}
+
+  let costTiers: CostTier[] = [];
+  try { costTiers = JSON.parse(costTiersStr); } catch {}
 
   const errors: Errors = {};
   if (!title) errors.title = "Title is required.";
@@ -105,6 +110,18 @@ export async function action(args: Route.ActionArgs) {
   if (intent === "publish" && slots.length === 0)
     errors.slots = "Add at least one time slot before publishing.";
 
+  // Validate cost tiers
+  for (let i = 0; i < costTiers.length; i++) {
+    if (!costTiers[i].label.trim()) {
+      errors.costTiers = `Tier ${i + 1}: label is required.`;
+      break;
+    }
+    if (costTiers[i].amount < 0) {
+      errors.costTiers = `Tier ${i + 1}: amount cannot be negative.`;
+      break;
+    }
+  }
+
   for (let i = 0; i < slots.length; i++) {
     const s = slots[i];
     const start = new Date(s.startsAt);
@@ -117,7 +134,7 @@ export async function action(args: Route.ActionArgs) {
   if (Object.keys(errors).length > 0) {
     return {
       errors,
-      values: { title, description, location, visibility, thresholdStr, deadlineStr, slots },
+      values: { title, description, location, visibility, thresholdStr, deadlineStr, slots, costTiers },
     };
   }
 
@@ -147,6 +164,7 @@ export async function action(args: Route.ActionArgs) {
       threshold,
       deadline,
       imageKey,
+      costTiersJson: costTiers.length > 0 ? JSON.stringify(costTiers) : null,
       status: newStatus,
       updatedAt: new Date(),
     })
@@ -191,17 +209,14 @@ export default function EditEvent() {
     }));
 
   const [slots, setSlots] = useState<SlotInput[]>(
-    initialSlots.length > 0 ? initialSlots : [{ startsAt: "", endsAt: "" }]
+    initialSlots.length > 0 ? initialSlots : []
   );
 
-  const addSlot = () =>
-    setSlots((prev) => [...prev, { startsAt: "", endsAt: "" }]);
-  const removeSlot = (i: number) =>
-    setSlots((prev) => prev.filter((_, idx) => idx !== i));
-  const updateSlot = (i: number, field: keyof SlotInput, value: string) =>
-    setSlots((prev) =>
-      prev.map((s, idx) => (idx === i ? { ...s, [field]: value } : s))
-    );
+  const initialTiers: CostTier[] =
+    vals?.costTiers ??
+    (event.costTiersJson ? (JSON.parse(event.costTiersJson) as CostTier[]) : []);
+
+  const [costTiers, setCostTiers] = useState<CostTier[]>(initialTiers);
 
   const isDraft = event.status === "draft";
 
@@ -217,6 +232,7 @@ export default function EditEvent() {
 
         <Form method="post" encType="multipart/form-data" className="event-form">
           <input type="hidden" name="slots" value={JSON.stringify(slots)} />
+          <input type="hidden" name="costTiers" value={JSON.stringify(costTiers)} />
 
           {/* ── Details ── */}
           <fieldset className="form-section">
@@ -362,44 +378,14 @@ export default function EditEvent() {
           <fieldset className="form-section">
             <legend className="form-section__legend">Time Slots</legend>
             {errors.slots && <p className="field__error">{errors.slots}</p>}
-            {slots.map((slot, i) => (
-              <div key={i} className="slot-row">
-                <div className="field">
-                  <label className="field__label">Start</label>
-                  <input
-                    type="datetime-local"
-                    className="field__input"
-                    value={slot.startsAt}
-                    onChange={(e) => updateSlot(i, "startsAt", e.target.value)}
-                  />
-                </div>
-                <div className="field">
-                  <label className="field__label">End</label>
-                  <input
-                    type="datetime-local"
-                    className="field__input"
-                    value={slot.endsAt}
-                    onChange={(e) => updateSlot(i, "endsAt", e.target.value)}
-                  />
-                </div>
-                {slots.length > 1 && (
-                  <button
-                    type="button"
-                    className="btn btn--ghost btn--sm"
-                    onClick={() => removeSlot(i)}
-                  >
-                    Remove
-                  </button>
-                )}
-              </div>
-            ))}
-            <button
-              type="button"
-              className="btn btn--ghost btn--sm"
-              onClick={addSlot}
-            >
-              + Add time slot
-            </button>
+            <SlotPicker slots={slots} onChange={setSlots} />
+          </fieldset>
+
+          {/* ── Pricing ── */}
+          <fieldset className="form-section">
+            <legend className="form-section__legend">Pricing</legend>
+            {errors.costTiers && <p className="field__error">{errors.costTiers}</p>}
+            <CostTierEditor tiers={costTiers} onChange={setCostTiers} />
           </fieldset>
 
           {/* ── Actions ── */}

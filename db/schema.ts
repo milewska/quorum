@@ -65,6 +65,8 @@ export const events = pgTable("events", {
   deadline: timestamp("deadline").notNull(),
   // Populated when organizer confirms; points to external registration page
   registrationUrl: text("registration_url"),
+  // JSON array of { label: string, amount: number (cents, 0=free) }. Null = free event.
+  costTiersJson: text("cost_tiers_json"),
   status: eventStatusEnum("status").notNull().default("draft"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -101,6 +103,9 @@ export const commitments = pgTable("commitments", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   // Soft-delete for withdrawal. Null = active commitment.
   withdrawnAt: timestamp("withdrawn_at"),
+  // Which pricing tier the committer chose (null for free events).
+  tierLabel: text("tier_label"),
+  tierAmount: integer("tier_amount"),
 });
 
 // ─── Attendance ───────────────────────────────────────────────────────────────

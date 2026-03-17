@@ -1,10 +1,12 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { Link, redirect, useFetcher, useLoaderData } from "react-router";
+import { useState } from "react";
 import { getOptionalUser, requireUser } from "~/auth.server";
 import { getEnv } from "~/env.server";
 import { getDb } from "../../db";
 import { commitments, events, timeSlots, users } from "../../db/schema";
 import type { Route } from "./+types/events.$id";
+import type { CostTier } from "~/components/CostTierEditor";
 
 function deadlineCountdown(deadline: Date): string {
   const diff = deadline.getTime() - Date.now();
@@ -69,20 +71,30 @@ export async function loader(args: Route.LoaderArgs) {
     )
     .orderBy(commitments.createdAt);
 
-  // Current user's active commitments (slot IDs they've committed to)
-  const myCommittedSlotIds: string[] = dbUserId
-    ? (
-        await db
-          .select({ timeSlotId: commitments.timeSlotId })
-          .from(commitments)
-          .where(
-            and(
-              eq(commitments.userId, dbUserId),
-              eq(commitments.eventId, params.id),
-              isNull(commitments.withdrawnAt)
-            )
+  // Current user's active commitments with tier info
+  const myCommitmentRows = dbUserId
+    ? await db
+        .select({
+          timeSlotId: commitments.timeSlotId,
+          tierLabel: commitments.tierLabel,
+          tierAmount: commitments.tierAmount,
+        })
+        .from(commitments)
+        .where(
+          and(
+            eq(commitments.userId, dbUserId),
+            eq(commitments.eventId, params.id),
+            isNull(commitments.withdrawnAt)
           )
-      ).map((r) => r.timeSlotId)
+        )
+    : [];
+
+  const myCommittedSlotIds = myCommitmentRows.map((r) => r.timeSlotId);
+  const myTierBySlotId: Record<string, { tierLabel: string | null; tierAmount: number | null }> =
+    Object.fromEntries(myCommitmentRows.map((r) => [r.timeSlotId, { tierLabel: r.tierLabel, tierAmount: r.tierAmount }]));
+
+  const costTiers: CostTier[] = row.event.costTiersJson
+    ? (JSON.parse(row.event.costTiersJson) as CostTier[])
     : [];
 
   return {
@@ -93,6 +105,8 @@ export async function loader(args: Route.LoaderArgs) {
     isOrganizer,
     isSignedIn: authUser !== null,
     myCommittedSlotIds,
+    myTierBySlotId,
+    costTiers,
   };
 }
 
@@ -115,6 +129,9 @@ export async function action(args: Route.ActionArgs) {
   const form = await request.formData();
   const intent = form.get("intent") as string;
   const slotId = form.get("slotId") as string;
+  const tierLabel = (form.get("tierLabel") as string) || null;
+  const tierAmountRaw = form.get("tierAmount") as string | null;
+  const tierAmount = tierAmountRaw !== null && tierAmountRaw !== "" ? parseInt(tierAmountRaw, 10) : null;
   if (!slotId) throw new Response("Missing slotId", { status: 400 });
 
   // Verify the slot belongs to this event
@@ -157,6 +174,8 @@ export async function action(args: Route.ActionArgs) {
         userId: dbUser.id,
         timeSlotId: slotId,
         eventId: params.id,
+        tierLabel,
+        tierAmount,
       });
       await db
         .update(timeSlots)
@@ -210,6 +229,11 @@ const STATUS_LABEL: Record<string, string> = {
   expired: "Expired",
 };
 
+function formatCents(cents: number): string {
+  if (cents === 0) return "Free";
+  return `$${(cents / 100).toFixed(2)}`;
+}
+
 // ─── Commit / Withdraw button ─────────────────────────────────────────────────
 
 function CommitButton({
@@ -219,6 +243,8 @@ function CommitButton({
   isSignedIn,
   isOrganizer,
   deadlinePassed,
+  costTiers,
+  myTier,
 }: {
   slotId: string;
   slotStatus: string;
@@ -226,9 +252,14 @@ function CommitButton({
   isSignedIn: boolean;
   isOrganizer: boolean;
   deadlinePassed: boolean;
+  costTiers: CostTier[];
+  myTier: { tierLabel: string | null; tierAmount: number | null } | null;
 }) {
   const fetcher = useFetcher();
   const pending = fetcher.state !== "idle";
+  const [selectedTierLabel, setSelectedTierLabel] = useState<string | null>(
+    costTiers.length === 0 ? "__free__" : null
+  );
 
   if (isOrganizer) return null;
 
@@ -244,9 +275,14 @@ function CommitButton({
     slotStatus === "quorum_reached" || slotStatus === "confirmed";
 
   if (committed) {
+    const tier = myTier;
     return (
       <div className="slot-card__commit-row">
-        <span className="slot-card__committed-badge">✓ Committed</span>
+        <span className="slot-card__committed-badge">
+          ✓ Committed
+          {tier?.tierLabel ? ` — ${tier.tierLabel}` : ""}
+          {tier?.tierAmount != null && tier.tierAmount > 0 ? ` (${formatCents(tier.tierAmount)})` : ""}
+        </span>
         {locked || deadlinePassed ? (
           <span className="slot-card__locked-note">
             {locked ? "Withdrawal locked — quorum reached" : "Deadline passed"}
@@ -270,18 +306,47 @@ function CommitButton({
 
   if (deadlinePassed || locked) return null;
 
+  const selectedTier = costTiers.find((t) => t.label === selectedTierLabel);
+  const canSubmit = selectedTierLabel !== null;
+
   return (
-    <fetcher.Form method="post">
-      <input type="hidden" name="intent" value="commit" />
-      <input type="hidden" name="slotId" value={slotId} />
-      <button
-        type="submit"
-        className="btn btn--primary btn--sm"
-        disabled={pending}
-      >
-        {pending ? "Committing…" : "Commit to this slot"}
-      </button>
-    </fetcher.Form>
+    <div className="slot-card__commit-block">
+      {costTiers.length > 0 && (
+        <div className="tier-selector">
+          <p className="tier-selector__label">Select your tier:</p>
+          {costTiers.map((t) => (
+            <label key={t.label} className="tier-option">
+              <input
+                type="radio"
+                name={`tier-${slotId}`}
+                value={t.label}
+                checked={selectedTierLabel === t.label}
+                onChange={() => setSelectedTierLabel(t.label)}
+              />
+              <span className="tier-option__name">{t.label}</span>
+              <span className="tier-option__price">{formatCents(t.amount)}</span>
+            </label>
+          ))}
+        </div>
+      )}
+      <fetcher.Form method="post">
+        <input type="hidden" name="intent" value="commit" />
+        <input type="hidden" name="slotId" value={slotId} />
+        {selectedTier && (
+          <>
+            <input type="hidden" name="tierLabel" value={selectedTier.label} />
+            <input type="hidden" name="tierAmount" value={String(selectedTier.amount)} />
+          </>
+        )}
+        <button
+          type="submit"
+          className="btn btn--primary btn--sm"
+          disabled={pending || !canSubmit}
+        >
+          {pending ? "Committing…" : "Commit to this slot"}
+        </button>
+      </fetcher.Form>
+    </div>
   );
 }
 
@@ -296,6 +361,8 @@ export default function EventDetail() {
     isOrganizer,
     isSignedIn,
     myCommittedSlotIds,
+    myTierBySlotId,
+    costTiers,
   } = useLoaderData<typeof loader>();
 
   const deadlineDate = new Date(event.deadline);
@@ -341,6 +408,21 @@ export default function EventDetail() {
             Organised by {organizerName} &middot; Quorum: {event.threshold}{" "}
             commitments
           </p>
+          {costTiers.length > 0 && (
+            <div className="cost-tiers-summary">
+              <span className="cost-tiers-summary__label">Pricing:</span>
+              {costTiers.map((t) => (
+                <span key={t.label} className="cost-badge cost-badge--paid">
+                  {t.label} &mdash; {formatCents(t.amount)}
+                </span>
+              ))}
+            </div>
+          )}
+          {costTiers.length === 0 && (
+            <div className="cost-tiers-summary">
+              <span className="cost-badge">Free</span>
+            </div>
+          )}
 
           {isOrganizer && (
             <Link to={`/events/${event.id}/edit`} className="btn btn--ghost">
@@ -424,6 +506,8 @@ export default function EventDetail() {
                       isSignedIn={isSignedIn}
                       isOrganizer={isOrganizer}
                       deadlinePassed={deadlinePassed}
+                      costTiers={costTiers}
+                      myTier={myTierBySlotId[slot.id] ?? null}
                     />
 
                     {slotParticipants.length > 0 && (
