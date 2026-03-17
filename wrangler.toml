@@ -11,9 +11,15 @@ pages_build_output_dir = "./build/client"
 binding = "IMAGES"
 bucket_name = "quorum-images"
 
+# Outbound email via Cloudflare Email Routing
+# Requires Email Routing enabled on the domain + a verified sender address.
+# Configure in CF dashboard: Email > Email Routing > Send email workers
+[[send_email]]
+name = "EMAIL"
+
 # Secrets (set via `wrangler pages secret put <KEY>` or the CF dashboard):
 #   DATABASE_URL
 #   WORKOS_API_KEY
 #   WORKOS_CLIENT_ID
-#   RESEND_API_KEY
 #   SESSION_SECRET
+#   EMAIL_FROM   (e.g. noreply@quorum.malamaconsulting.com)

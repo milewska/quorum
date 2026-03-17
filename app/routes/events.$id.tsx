@@ -7,6 +7,11 @@ import { getDb } from "../../db";
 import { commitments, events, timeSlots, users } from "../../db/schema";
 import type { Route } from "./+types/events.$id";
 import type { CostTier } from "~/components/CostTierEditor";
+import {
+  sendMail,
+  quorumReachedOrganizerEmail,
+  quorumReachedParticipantEmail,
+} from "~/email.server";
 
 function deadlineCountdown(deadline: Date): string {
   const diff = deadline.getTime() - Date.now();
@@ -130,7 +135,8 @@ export async function loader(args: Route.LoaderArgs) {
 
 export async function action(args: Route.ActionArgs) {
   const { params, request, context } = args;
-  const db = getDb(getEnv(context));
+  const env = getEnv(context);
+  const db = getDb(env);
   const auth = await requireUser(args);
   const workosId = auth.user.id;
 
@@ -158,18 +164,26 @@ export async function action(args: Route.ActionArgs) {
     .limit(1);
   if (!slot) throw new Response("Slot not found", { status: 404 });
 
-  // Verify the user is not the organizer
-  const [eventRow] = await db
-    .select({ organizerId: events.organizerId })
+  // Load event with organizer email
+  const rows = await db
+    .select({
+      event: events,
+      organizerEmail: users.email,
+      organizerName: users.fullName,
+    })
     .from(events)
+    .innerJoin(users, eq(users.id, events.organizerId))
     .where(eq(events.id, params.id))
     .limit(1);
-  if (!eventRow) throw new Response("Event not found", { status: 404 });
-  if (eventRow.organizerId === dbUser.id) {
+  const eventData = rows[0];
+  if (!eventData) throw new Response("Event not found", { status: 404 });
+  if (eventData.event.organizerId === dbUser.id) {
     throw new Response("Organizers cannot commit to their own event", {
       status: 403,
     });
   }
+
+  const baseUrl = new URL(request.url).origin;
 
   if (intent === "commit") {
     // Check for an existing active commitment
@@ -184,8 +198,8 @@ export async function action(args: Route.ActionArgs) {
         )
       )
       .limit(1);
+
     if (!existing) {
-      // Insert commitment and increment counter
       await db.insert(commitments).values({
         userId: dbUser.id,
         timeSlotId: slotId,
@@ -193,10 +207,80 @@ export async function action(args: Route.ActionArgs) {
         tierLabel,
         tierAmount,
       });
+
+      const newCount = slot.commitmentCount + 1;
       await db
         .update(timeSlots)
-        .set({ commitmentCount: slot.commitmentCount + 1 })
+        .set({ commitmentCount: newCount })
         .where(eq(timeSlots.id, slotId));
+
+      // ── Quorum detection ───────────────────────────────────────────────────
+      const threshold = eventData.event.threshold;
+      const slotJustReachedQuorum =
+        slot.status === "active" && newCount >= threshold;
+
+      if (slotJustReachedQuorum) {
+        // Update slot status
+        await db
+          .update(timeSlots)
+          .set({ status: "quorum_reached" })
+          .where(eq(timeSlots.id, slotId));
+
+        // Update event status if not already elevated
+        if (
+          eventData.event.status === "active" ||
+          eventData.event.status === "draft"
+        ) {
+          await db
+            .update(events)
+            .set({ status: "quorum_reached", updatedAt: new Date() })
+            .where(eq(events.id, params.id));
+        }
+
+        // Send emails (fire-and-forget on error so commitment still saves)
+        const slotDate = new Date(slot.startsAt).toLocaleDateString("en-US", {
+          weekday: "long",
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        });
+
+        try {
+          // Email organizer
+          const orgEmail = quorumReachedOrganizerEmail(
+            eventData.event.title,
+            params.id,
+            slotDate,
+            baseUrl
+          );
+          await sendMail(env, { to: eventData.organizerEmail, ...orgEmail });
+
+          // Email all committed participants on this slot
+          const participantRows = await db
+            .select({ email: users.email })
+            .from(commitments)
+            .innerJoin(users, eq(users.id, commitments.userId))
+            .where(
+              and(
+                eq(commitments.timeSlotId, slotId),
+                isNull(commitments.withdrawnAt)
+              )
+            );
+          for (const p of participantRows) {
+            const pEmail = quorumReachedParticipantEmail(
+              eventData.event.title,
+              params.id,
+              slotDate,
+              baseUrl
+            );
+            await sendMail(env, { to: p.email, ...pEmail });
+          }
+        } catch (e) {
+          console.error("Email send failed after quorum reached:", e);
+        }
+      }
     }
   } else if (intent === "withdraw") {
     // Only allow withdrawal if slot is not quorum_reached / confirmed
@@ -222,12 +306,39 @@ export async function action(args: Route.ActionArgs) {
         .update(commitments)
         .set({ withdrawnAt: new Date() })
         .where(eq(commitments.id, existing.id));
+
+      const newCount = Math.max(0, slot.commitmentCount - 1);
       await db
         .update(timeSlots)
-        .set({
-          commitmentCount: Math.max(0, slot.commitmentCount - 1),
-        })
+        .set({ commitmentCount: newCount })
         .where(eq(timeSlots.id, slotId));
+
+      // Revert slot to active if count drops below threshold
+      const slotStatusNow = slot.status as string;
+      if (slotStatusNow === "quorum_reached" && newCount < eventData.event.threshold) {
+        await db
+          .update(timeSlots)
+          .set({ status: "active" })
+          .where(eq(timeSlots.id, slotId));
+
+        // Check if any other slot on this event still has quorum
+        const stillQuorumSlots = await db
+          .select({ id: timeSlots.id })
+          .from(timeSlots)
+          .where(
+            and(
+              eq(timeSlots.eventId, params.id),
+              eq(timeSlots.status, "quorum_reached")
+            )
+          )
+          .limit(1);
+        if (stillQuorumSlots.length === 0 && eventData.event.status === "quorum_reached") {
+          await db
+            .update(events)
+            .set({ status: "active", updatedAt: new Date() })
+            .where(eq(events.id, params.id));
+        }
+      }
     }
   }
 
