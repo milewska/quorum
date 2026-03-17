@@ -133,11 +133,14 @@ export function SlotPicker({ slots, onChange }: SlotPickerProps) {
     days[6].toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
   }`;
 
-  // Rows that would be highlighted by the hover preview
+  // Show hover preview on empty cells AND continuation (mid/end) cells.
+  // Do NOT show preview on start/single cells — those are "click to remove" targets.
   const previewKeys = new Set<string>();
   if (hoverCell) {
     const { col, row } = hoverCell;
-    if (!cellMap.has(`${col}-${row}`)) {
+    const hoverInfo = cellMap.get(`${col}-${row}`);
+    const isRemoveTarget = hoverInfo?.position === "start" || hoverInfo?.position === "single";
+    if (!isRemoveTarget) {
       const clampedEnd = Math.min(row + durationBlocks, TOTAL_ROWS);
       for (let r = row; r < clampedEnd; r++) {
         previewKeys.add(`${col}-${r}`);
@@ -147,14 +150,13 @@ export function SlotPicker({ slots, onChange }: SlotPickerProps) {
 
   function handleCellClick(col: number, row: number) {
     const info = cellMap.get(`${col}-${row}`);
-    if (info) {
-      // Remove the slot that owns this cell
+    if (info && (info.position === "start" || info.position === "single")) {
+      // Only the solid top cell removes the slot
       onChange(slots.filter((s) => s.startsAt !== info.startsAt));
     } else {
-      // Add a new slot — clamp so it doesn't spill past grid end
+      // Empty cell OR transparent continuation cell: add a new slot starting here
       const actualBlocks = Math.min(durationBlocks, TOTAL_ROWS - row);
       const { startsAt, endsAt } = cellToSlot(weekStart, col, row, actualBlocks);
-      // Avoid duplicate start times
       if (!slots.some((s) => s.startsAt === startsAt)) {
         onChange([...slots, { startsAt, endsAt }]);
       }
@@ -255,7 +257,7 @@ export function SlotPicker({ slots, onChange }: SlotPickerProps) {
                     role="button"
                     tabIndex={0}
                     aria-label={`${
-                      info ? "Remove" : "Add"
+                      (info?.position === "start" || info?.position === "single") ? "Remove" : "Add"
                     } slot at ${formatRowLabel(row)} on ${COL_LABELS[col]}`}
                     onKeyDown={(e) => {
                       if (e.key === " " || e.key === "Enter") {

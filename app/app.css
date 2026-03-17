@@ -696,6 +696,31 @@ a {
   margin-bottom: 0.25rem;
 }
 
+.event-card__title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.event-card__price-badge {
+  flex-shrink: 0;
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 99px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: #ede9fe;
+  color: #4338ca;
+  white-space: nowrap;
+  line-height: 1.6;
+}
+
+.event-card__price-badge--free {
+  background: #dcfce7;
+  color: #15803d;
+}
+
 .event-card__meta {
   font-size: 0.8125rem;
   color: var(--color-muted);
@@ -1226,13 +1251,19 @@ a {
 }
 
 /* ── Selected block cells ── */
-/* Semi-transparent so adjacent or overlapping blocks stay visible */
+/* Top cell (start / single) = solid — click to remove */
 .slot-picker__cell--single,
-.slot-picker__cell--start,
+.slot-picker__cell--start {
+  background: rgba(79, 70, 229, 0.88);
+  border-left-color: rgba(79, 70, 229, 0.5);
+  cursor: pointer;
+}
+
+/* Continuation cells (mid / end) = transparent — click to add a new slot starting here */
 .slot-picker__cell--mid,
 .slot-picker__cell--end {
-  background: rgba(79, 70, 229, 0.55);
-  border-left-color: rgba(79, 70, 229, 0.3);
+  background: rgba(79, 70, 229, 0.22);
+  border-left-color: rgba(79, 70, 229, 0.18);
   cursor: pointer;
 }
 
@@ -1263,11 +1294,26 @@ a {
   border-top: none;
 }
 
+/* Hovering the solid top cell: red tint signals "click to remove" */
 .slot-picker__cell--single:hover,
-.slot-picker__cell--start:hover,
+.slot-picker__cell--start:hover {
+  background: rgba(220, 38, 38, 0.35);
+}
+
+/* Hovering a continuation cell: slightly more visible */
 .slot-picker__cell--mid:hover,
 .slot-picker__cell--end:hover {
-  background: rgba(79, 70, 229, 0.72);
+  background: rgba(79, 70, 229, 0.38);
+}
+
+/* Preview overlaid on a continuation cell: ensure preview bg wins over raw hover */
+.slot-picker__cell--mid.slot-picker__cell--preview,
+.slot-picker__cell--end.slot-picker__cell--preview {
+  background: rgba(79, 70, 229, 0.42);
+}
+.slot-picker__cell--mid.slot-picker__cell--preview:hover,
+.slot-picker__cell--end.slot-picker__cell--preview:hover {
+  background: rgba(79, 70, 229, 0.55);
 }
 
 /* ── Hover preview cells ── */

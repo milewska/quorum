@@ -5,6 +5,26 @@ import { events, timeSlots } from "../../db/schema";
 import { getEnv } from "~/env.server";
 import type { Route } from "./+types/events._index";
 
+type CostTier = { label: string; amount: number };
+
+function priceBadge(costTiersJson: string | null): { text: string; free: boolean } {
+  if (!costTiersJson) return { text: "Free", free: true };
+  try {
+    const tiers: CostTier[] = JSON.parse(costTiersJson);
+    if (!tiers.length) return { text: "Free", free: true };
+    const amounts = tiers.map((t) => t.amount).filter((a) => a > 0);
+    if (!amounts.length) return { text: "Free", free: true };
+    const min = Math.min(...amounts);
+    const max = Math.max(...amounts);
+    const fmt = (cents: number) =>
+      (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0 });
+    if (tiers.length === 1) return { text: fmt(min), free: false };
+    return { text: `From ${fmt(min)}`, free: false };
+  } catch {
+    return { text: "Free", free: true };
+  }
+}
+
 export async function loader({ request, context }: Route.LoaderArgs) {
   const db = getDb(getEnv(context));
   const url = new URL(request.url);
@@ -35,6 +55,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       deadline: events.deadline,
       threshold: events.threshold,
       imageKey: events.imageKey,
+      costTiersJson: events.costTiersJson,
       maxCommitments: sql<number>`coalesce(${maxCommitsSq.maxCount}, 0)`,
     })
     .from(events)
@@ -103,6 +124,7 @@ export default function EventsIndex() {
               100,
               (ev.maxCommitments / ev.threshold) * 100
             );
+            const price = priceBadge(ev.costTiersJson ?? null);
             return (
               <li key={ev.id}>
                 <Link to={`/events/${ev.id}`} className="event-card">
@@ -116,7 +138,12 @@ export default function EventsIndex() {
                     </div>
                   )}
                   <div className="event-card__body">
-                    <h2 className="event-card__title">{ev.title}</h2>
+                    <div className="event-card__title-row">
+                      <h2 className="event-card__title">{ev.title}</h2>
+                      <span className={`event-card__price-badge${price.free ? " event-card__price-badge--free" : ""}`}>
+                        {price.text}
+                      </span>
+                    </div>
                     <p className="event-card__meta">{ev.location}</p>
                     <p className="event-card__meta">
                       Deadline:{" "}
