@@ -97,6 +97,17 @@ export default function App() {
         <p className="site-footer__copy">
           &copy; {new Date().getFullYear()} Quorum
         </p>
+        <p className="site-footer__build">
+          v{__APP_VERSION__} &middot; deployed{" "}
+          {new Date(__BUILD_TIME__).toLocaleString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+            timeZoneName: "short",
+          })}
+        </p>
       </footer>
     </div>
   );

@@ -1,12 +1,32 @@
-import { and, desc, eq } from "drizzle-orm";
-import { Link, useLoaderData } from "react-router";
+import { and, asc, desc, eq, ilike, sql } from "drizzle-orm";
+import { Form, Link, useLoaderData } from "react-router";
 import { getDb } from "../../db";
-import { events } from "../../db/schema";
+import { events, timeSlots } from "../../db/schema";
 import { getEnv } from "~/env.server";
 import type { Route } from "./+types/events._index";
 
-export async function loader({ context }: Route.LoaderArgs) {
+export async function loader({ request, context }: Route.LoaderArgs) {
   const db = getDb(getEnv(context));
+  const url = new URL(request.url);
+  const q = url.searchParams.get("q")?.trim() ?? "";
+  const sort = url.searchParams.get("sort") ?? "deadline";
+
+  const conditions = [
+    eq(events.status, "active"),
+    eq(events.visibility, "public"),
+    ...(q ? [ilike(events.location, `%${q}%`)] : []),
+  ];
+
+  // Max commitment count across all slots for each event (for sort)
+  const maxCommitsSq = db
+    .select({
+      eventId: timeSlots.eventId,
+      maxCount: sql<number>`max(${timeSlots.commitmentCount})`.as("max_count"),
+    })
+    .from(timeSlots)
+    .groupBy(timeSlots.eventId)
+    .as("max_commits");
+
   const list = await db
     .select({
       id: events.id,
@@ -15,16 +35,23 @@ export async function loader({ context }: Route.LoaderArgs) {
       deadline: events.deadline,
       threshold: events.threshold,
       imageKey: events.imageKey,
+      maxCommitments: sql<number>`coalesce(${maxCommitsSq.maxCount}, 0)`,
     })
     .from(events)
-    .where(and(eq(events.status, "active"), eq(events.visibility, "public")))
-    .orderBy(desc(events.createdAt))
+    .leftJoin(maxCommitsSq, eq(maxCommitsSq.eventId, events.id))
+    .where(and(...conditions))
+    .orderBy(
+      sort === "commitments"
+        ? desc(sql`coalesce(${maxCommitsSq.maxCount}, 0)`)
+        : asc(events.deadline)
+    )
     .limit(50);
-  return { events: list };
+
+  return { events: list, q, sort };
 }
 
 export default function EventsIndex() {
-  const { events: list } = useLoaderData<typeof loader>();
+  const { events: list, q, sort } = useLoaderData<typeof loader>();
 
   return (
     <section className="page-section">
@@ -35,47 +62,89 @@ export default function EventsIndex() {
         </Link>
       </div>
 
+      {/* Filter + sort bar */}
+      <Form method="get" className="browse-bar">
+        <input
+          type="search"
+          name="q"
+          defaultValue={q}
+          placeholder="Filter by location…"
+          className="field__input browse-bar__search"
+        />
+        <select name="sort" defaultValue={sort} className="field__input browse-bar__sort">
+          <option value="deadline">Soonest deadline</option>
+          <option value="commitments">Most commitments</option>
+        </select>
+        <button type="submit" className="btn btn--ghost">
+          Filter
+        </button>
+        {(q || sort !== "deadline") && (
+          <a href="/events" className="btn btn--ghost">
+            Clear
+          </a>
+        )}
+      </Form>
+
       {list.length === 0 ? (
         <div className="empty-state">
-          <p>No public events yet. Be the first to create one.</p>
+          {q ? (
+            <p>No events found in &ldquo;{q}&rdquo;.</p>
+          ) : (
+            <p>No public events yet. Be the first to create one.</p>
+          )}
           <Link to="/events/new" className="btn btn--primary">
             Create event
           </Link>
         </div>
       ) : (
         <ul className="event-grid">
-          {list.map((ev) => (
-            <li key={ev.id}>
-              <Link to={`/events/${ev.id}`} className="event-card">
-                {ev.imageKey && (
-                  <div className="event-card__img-wrap">
-                    <img
-                      src={`/images/${ev.imageKey}`}
-                      alt={ev.title}
-                      className="event-card__img"
-                    />
+          {list.map((ev) => {
+            const pct = Math.min(
+              100,
+              (ev.maxCommitments / ev.threshold) * 100
+            );
+            return (
+              <li key={ev.id}>
+                <Link to={`/events/${ev.id}`} className="event-card">
+                  {ev.imageKey && (
+                    <div className="event-card__img-wrap">
+                      <img
+                        src={`/images/${ev.imageKey}`}
+                        alt={ev.title}
+                        className="event-card__img"
+                      />
+                    </div>
+                  )}
+                  <div className="event-card__body">
+                    <h2 className="event-card__title">{ev.title}</h2>
+                    <p className="event-card__meta">{ev.location}</p>
+                    <p className="event-card__meta">
+                      Deadline:{" "}
+                      {new Date(ev.deadline).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      })}
+                    </p>
+                    <div className="event-card__progress">
+                      <div className="slot-card__bar">
+                        <div
+                          className="slot-card__fill"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <span className="event-card__meta">
+                        {ev.maxCommitments} / {ev.threshold} committed
+                      </span>
+                    </div>
                   </div>
-                )}
-                <div className="event-card__body">
-                  <h2 className="event-card__title">{ev.title}</h2>
-                  <p className="event-card__meta">{ev.location}</p>
-                  <p className="event-card__meta">
-                    Deadline:{" "}
-                    {new Date(ev.deadline).toLocaleDateString("en-US", {
-                      month: "short",
-                      day: "numeric",
-                      year: "numeric",
-                    })}
-                  </p>
-                  <p className="event-card__meta">
-                    Needs {ev.threshold} commitments
-                  </p>
-                </div>
-              </Link>
-            </li>
-          ))}
+                </Link>
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>
   );
 }
+

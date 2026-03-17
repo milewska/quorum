@@ -1,21 +1,28 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { Link, useLoaderData } from "react-router";
 import { getOptionalUser } from "~/auth.server";
 import { getEnv } from "~/env.server";
 import { getDb } from "../../db";
-import { events, timeSlots, users } from "../../db/schema";
+import { commitments, events, timeSlots, users } from "../../db/schema";
 import type { Route } from "./+types/events.$id";
+
+function deadlineCountdown(deadline: Date): string {
+  const diff = deadline.getTime() - Date.now();
+  if (diff <= 0) return "Deadline passed";
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+  if (days > 0) return `${days}d ${hours}h left`;
+  if (hours > 0) return `${hours}h ${mins}m left`;
+  return `${mins}m left`;
+}
 
 export async function loader(args: Route.LoaderArgs) {
   const { params, context } = args;
   const db = getDb(getEnv(context));
 
-  // Load event with organizer name
   const rows = await db
-    .select({
-      event: events,
-      organizerName: users.fullName,
-    })
+    .select({ event: events, organizerName: users.fullName })
     .from(events)
     .innerJoin(users, eq(users.id, events.organizerId))
     .where(eq(events.id, params.id))
@@ -23,7 +30,6 @@ export async function loader(args: Route.LoaderArgs) {
 
   const row = rows[0];
 
-  // Check if current user is the organizer (to allow draft viewing + edit link)
   const authUser = await getOptionalUser(args);
   let isOrganizer = false;
   if (authUser) {
@@ -45,7 +51,30 @@ export async function loader(args: Route.LoaderArgs) {
     .where(eq(timeSlots.eventId, params.id))
     .orderBy(timeSlots.startsAt);
 
-  return { event: row.event, organizerName: row.organizerName, slots, isOrganizer };
+  // Committed participants (non-withdrawn), grouped by slot client-side
+  const participants = await db
+    .select({
+      slotId: commitments.timeSlotId,
+      name: users.fullName,
+      avatarUrl: users.avatarUrl,
+    })
+    .from(commitments)
+    .innerJoin(users, eq(users.id, commitments.userId))
+    .where(
+      and(
+        eq(commitments.eventId, params.id),
+        isNull(commitments.withdrawnAt)
+      )
+    )
+    .orderBy(commitments.createdAt);
+
+  return {
+    event: row.event,
+    organizerName: row.organizerName,
+    slots,
+    participants,
+    isOrganizer,
+  };
 }
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
@@ -62,11 +91,19 @@ const STATUS_LABEL: Record<string, string> = {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function EventDetail() {
-  const { event, organizerName, slots, isOrganizer } =
+  const { event, organizerName, slots, participants, isOrganizer } =
     useLoaderData<typeof loader>();
 
   const deadlineDate = new Date(event.deadline);
-  const isPast = deadlineDate < new Date();
+  const countdown = deadlineCountdown(deadlineDate);
+
+  // Group participants by slot id
+  const bySlot = participants.reduce<
+    Record<string, typeof participants>
+  >((acc, p) => {
+    (acc[p.slotId] ??= []).push(p);
+    return acc;
+  }, {});
 
   return (
     <section className="page-section">
@@ -85,11 +122,18 @@ export default function EventDetail() {
           <h1 className="event-detail__title">{event.title}</h1>
 
           <p className="event-detail__meta">
-            {event.location} ·{" "}
-            {isPast ? "Deadline passed" : `Deadline: ${deadlineDate.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`}
+            {event.location} &middot;{" "}
+            <span className="event-detail__countdown">{countdown}</span>
+            {" "}&middot; deadline{" "}
+            {deadlineDate.toLocaleDateString("en-US", {
+              month: "long",
+              day: "numeric",
+              year: "numeric",
+            })}
           </p>
           <p className="event-detail__meta">
-            Organised by {organizerName} · Quorum: {event.threshold} commitments
+            Organised by {organizerName} &middot; Quorum: {event.threshold}{" "}
+            commitments
           </p>
 
           {isOrganizer && (
@@ -127,6 +171,7 @@ export default function EventDetail() {
                   100,
                   (slot.commitmentCount / event.threshold) * 100
                 );
+                const slotParticipants = bySlot[slot.id] ?? [];
                 return (
                   <li key={slot.id} className="slot-card">
                     <div className="slot-card__time">
@@ -139,7 +184,7 @@ export default function EventDetail() {
                           minute: "2-digit",
                         })}
                       </span>
-                      <span className="slot-card__dash">–</span>
+                      <span className="slot-card__dash">&ndash;</span>
                       <span>
                         {new Date(slot.endsAt).toLocaleString("en-US", {
                           hour: "numeric",
@@ -147,6 +192,7 @@ export default function EventDetail() {
                         })}
                       </span>
                     </div>
+
                     <div className="slot-card__progress">
                       <div className="slot-card__bar">
                         <div
@@ -158,6 +204,30 @@ export default function EventDetail() {
                         {slot.commitmentCount} / {event.threshold} committed
                       </span>
                     </div>
+
+                    {slotParticipants.length > 0 && (
+                      <div className="slot-card__participants">
+                        <ul className="participant-list">
+                          {slotParticipants.map((p, i) => (
+                            <li key={i} className="participant">
+                              {p.avatarUrl ? (
+                                <img
+                                  src={p.avatarUrl}
+                                  alt={p.name}
+                                  className="participant__avatar"
+                                  referrerPolicy="no-referrer"
+                                />
+                              ) : (
+                                <span className="participant__avatar participant__avatar--initials">
+                                  {p.name[0]?.toUpperCase() ?? "?"}
+                                </span>
+                              )}
+                              <span className="participant__name">{p.name}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </li>
                 );
               })}
@@ -168,3 +238,4 @@ export default function EventDetail() {
     </section>
   );
 }
+
