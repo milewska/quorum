@@ -190,6 +190,14 @@ export default function Dashboard() {
                       Edit
                     </a>
                   )}
+                  {(ev.status === "quorum_reached" || ev.status === "confirmed") && (
+                    <a
+                      href={`/events/${ev.id}/manage`}
+                      className="btn btn--primary btn--sm"
+                    >
+                      Manage
+                    </a>
+                  )}
                 </div>
               </li>
             ))}

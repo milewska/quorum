@@ -13,6 +13,7 @@ export default [
   route("events/new", "routes/events.new.tsx"),
   route("events/:id", "routes/events.$id.tsx"),
   route("events/:id/edit", "routes/events.$id.edit.tsx"),
+  route("events/:id/manage", "routes/events.$id.manage.tsx"),
 
   // Dashboard
   route("dashboard", "routes/dashboard.tsx"),

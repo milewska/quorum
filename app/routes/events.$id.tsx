@@ -552,10 +552,31 @@ export default function EventDetail() {
             </div>
           )}
 
+          {event.status === "confirmed" && event.registrationUrl && myCommittedSlotIds.length > 0 && (
+            <div className="event-detail__registration">
+              <p className="event-detail__registration-msg">This event is confirmed! Register your spot:</p>
+              <a
+                href={event.registrationUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="btn btn--primary"
+              >
+                Register Now →
+              </a>
+            </div>
+          )}
+
           {isOrganizer && (
-            <Link to={`/events/${event.id}/edit`} className="btn btn--ghost">
-              Edit event
-            </Link>
+            <div className="event-detail__organizer-actions">
+              <Link to={`/events/${event.id}/edit`} className="btn btn--ghost">
+                Edit event
+              </Link>
+              {(event.status === "quorum_reached" || event.status === "confirmed") && (
+                <Link to={`/events/${event.id}/manage`} className="btn btn--primary">
+                  Manage event
+                </Link>
+              )}
+            </div>
           )}
         </div>
 

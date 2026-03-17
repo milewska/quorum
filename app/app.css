@@ -1561,3 +1561,180 @@ a {
   background: #fef3c7;
   color: #92400e;
 }
+/* ─── Manage Event Page ──────────────────────────────────────────────────────── */
+
+.manage-event {
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.manage-event__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.manage-event__title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  margin: 0.375rem 0 0.25rem;
+  line-height: 1.2;
+}
+
+.manage-event__sub {
+  color: var(--color-muted);
+  font-size: 0.9375rem;
+  margin: 0;
+}
+
+.manage-event__header-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.manage-event__error {
+  background: #fee2e2;
+  color: #991b1b;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  font-size: 0.9375rem;
+}
+
+.manage-event__empty {
+  color:   color:   color:   color:   color:   color:   color:   co  flex-direction: column;
+  gap: 1rem;
+}
+
+.manage-section__title {
+  font-size: 1.125rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.manage-section__desc {
+  color: var(--color-muted);
+  font-size: 0.9375rem;
+  margin: 0;
+}
+
+.manage-slot-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.manage-slot-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.manage-slot-card--quorum {.manage-slot-card--78.manage-slot-card--quorum {
+}}}}}}}}}}}}}}}}}}}}}}}on}}}}}}}}}  border-color: #34d399;
+  background: #f0fdf4;
+}
+
+.manage-slot-card__time {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex  flex  flex   font-siz  flex  flex  flexmanage-slot-card__dash {
+  color: var(--color-muted);
+}
+
+.manage-slot-card__reg-url {
+  font-size: 0.875rem;
+  margin: 0;
+  color: var(--color-muted);
+  word-break: break-all;
+}
+
+.manage-slot-card__reg-url a {
+  color: var(--color-primary);
+}
+
+.manage-participant-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.manage-participant-list li {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 99px;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.8125rem;
+                                   age                                   age -d                     ap: 0.75rem;
+}
+
+.manag.manag.manform__f.manag.manag.manform__f.  .manag.manag.ma column;
+  gap: 0.375rem;
+}
+
+.manage-confirm-form__label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.manage-confirm-form__input {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 0.9375rem;
+  width: 100%;
+  background: #fff;
+}
+
+.manage-confirm-form__input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.12);
+}
+
+/* ─── Event detail: organizer actions + registration banner ─────────────────── */
+
+.event-detail__organizer-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.25rem;
+}
+
+.event-detail__registration {
+  margin-top: 1rem;
+  padding: 1rem 1.25rem;
+  background: #f0fdf4;
+  border: 1px solid #34d399;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.event-detail__registration-msg {
+  margin: 0;
+  font-weight: 600;
+  color: #065f46;
+  flex: 1;
+}
