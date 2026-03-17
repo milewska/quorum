@@ -1738,3 +1738,123 @@ a {
   color: #065f46;
   flex: 1;
 }
+
+/* ─── Reputation score next to participant ───────────────────────────────────── */
+
+.participant__name {
+  color: inherit;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.participant__name:hover {
+  text-decoration: underline;
+}
+
+.participant__rep {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-muted);
+  background: #f3f4f6;
+  border-radius: 99px;
+  padding: 0.15rem 0.45rem;
+  margin-left: 0.25rem;
+  flex-shrink: 0;
+}
+
+/* ─── Attendance tracking (manage page) ─────────────────────────────────────── */
+
+.manage-attendance {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.manage-attendance__label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-muted);
+  margin: 0;
+}
+
+.manage-attendance-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  margin: 0;
+
+none;
+ist {
+);
+ing (manage page) ───�
+�;}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}  w}}}}}}}}}}}}}}}}}}}t:}}}}}}}}}}}}}}}}ra}}}}}}}}}}}}}}}}}}}}}}}x }}}}}}}}}}}}}}}}r-borde}}}}}}}}}}}}}}}}}}}}}}}}} color: var(--color-muted);
+  font-size: 0.875rem;
+  di  di  di  di  di  di-i  di  dinter;
+  just  just  just  just  just  jor  just  just  just  jink: 0;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+  padding: 0;
+  line-heig  line-heig  line-heig  line-heig  line-heig  line-heig  line-heig  line-heig  line-heig  line-heig  line-heig  line-heig  line-heig  line-heig  line-heig  lin  font-size: 0.9375rem;
+}
+
+/* �/* �/* �/* �/* te/* �/* �/* �/* �/* te/* �/* �/* �/*──�/* �/* �/* �/* �/* te/* �─/* �/* �/* �/*�────────────────────────�/�──── */
+
+.manage.manage.manage.ma  d.manage flex;
+.manage.manction: column;
+  gap: 0.625rem;  gap: 0.625rem;  gap:em;
+  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bac  bact-  bac  bac  bac  bac  #  bac  bac  bac  bac  bac  bac  bac und: #16a34a;
+  color: #fff;
+}
+
+.btn--success:hover {
+  background: #15803d;
+}
+
+/* ─── User profile page ────────────/* ─── User profile page ────────────/* ─── User profile page ────────────/* ─── User profile page ───────── disp/* ─── User profile page ────────────/* ─── User profile page ────────────/* ─── User profile page ──────────�rde/* ─── User profile page ──�le/* ─── Us
+.user-profile__avatar--initials {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.75rem;
+  font-weight: 700;
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
+.user-profile__name {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0 0 0.25rem;
+}
+
+.user-profile__meta {
+  color: var(--color-muted);
+  font-size: 0.9375rem;
+  margin: 0;
+}
+
+.user-profile__stats {
+  display: flex;
+  gap: 2rem;
+  padding: 1rem 1  padding: 1rkground: var(--color-surfac  padding: 1rem 1  paid va  padding: 1rem 1  padding: 1rkground: var(--color-surfac  padding: 1rem 1  paid va  padding: 1rem 1  padding: 1rkground: var(--color-surfac  padding: 1rem 1  paid va  padding: 1rem 1  padding: 1rkground: var(--color-surfac  padding: 1rem 1  paid va  padding: 1rem 1  padding: 1rkground: var(--color-surfac  padding: 1rem 1  paid va  padding: 1rem 1  padding: 1rkground: var(--color-surfac  padding: 1rem 1  paid va  padding: 1rem 1  padding: 1rkground: var(--color-surfac  padding: 1rem 1  paid va  padding: 1rem 1  pa{
+  padding: 1rem 1  padding: 1rkg;
+  padding: 1remdisplay: flex;
+  flex-direction: column;
+  gap: 0.62  gap: 0.62  gapvent-r  gap: 0.6play: flex  gap: 0.-items: center  gap: 0.62  gem;
+  p  p  p  p  p  p  p  ;
+  p  p  p  p  p  p -color-surface);
+  border: 1px solid var(--color-border);
+  border-rad  border-rad  border-radrap;
+  border-rad  border-itle {
+  font-weigh  font-weigh  fo1;
+  te  te  te  te  tnone;
+  color: var(--color-text);
+}
+
+.user-event-row__title:hover {
+  text-decoration: underline;
+}
+
+.user-event-row__meta {
+  font-size: 0.875rem;
+  color: var(--color-muted);
+}

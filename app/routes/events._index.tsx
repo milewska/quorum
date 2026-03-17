@@ -3,6 +3,7 @@ import { Form, Link, useLoaderData } from "react-router";
 import { getDb } from "../../db";
 import { events, timeSlots } from "../../db/schema";
 import { getEnv } from "~/env.server";
+import { expireOverdueEvents } from "~/expiry.server";
 import type { Route } from "./+types/events._index";
 
 type CostTier = { label: string; amount: number };
@@ -67,6 +68,13 @@ export async function loader({ request, context }: Route.LoaderArgs) {
         : asc(events.deadline)
     )
     .limit(50);
+
+  // On-load expiry: check all loaded active events
+  const activeIds = list.map((e) => e.id);
+  if (activeIds.length > 0) {
+    const baseUrl = new URL(request.url).origin;
+    await expireOverdueEvents(db, getEnv(context), activeIds, baseUrl);
+  }
 
   return { events: list, q, sort };
 }

@@ -90,3 +90,38 @@ export function eventConfirmedEmail(
   return { subject, html, text };
 }
 
+export function eventExpiredOrganizerEmail(
+  eventTitle: string,
+  eventId: string,
+  baseUrl: string
+): { subject: string; html: string; text: string } {
+  const eventUrl = `${baseUrl}/events/${eventId}`;
+  const subject = `⏰ ${eventTitle} has expired`;
+  const html = `
+<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+  <h2 style="margin-top:0">Your event has expired</h2>
+  <p>Unfortunately, <strong>${eventTitle}</strong> didn't reach its commitment threshold before the deadline.</p>
+  <p>You can create a new event and try again anytime.</p>
+  <p><a href="${eventUrl}">View the event page</a></p>
+</div>`.trim();
+  const text = `Your event "${eventTitle}" didn't reach quorum before the deadline.\n\nView it here: ${eventUrl}`;
+  return { subject, html, text };
+}
+
+export function eventExpiredParticipantEmail(
+  eventTitle: string,
+  eventId: string,
+  baseUrl: string
+): { subject: string; html: string; text: string } {
+  const eventsUrl = `${baseUrl}/events`;
+  const subject = `⏰ ${eventTitle} didn't reach quorum`;
+  const html = `
+<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+  <h2 style="margin-top:0">Not this time</h2>
+  <p><strong>${eventTitle}</strong> didn't reach its commitment threshold before the deadline.</p>
+  <p>Keep an eye out for other events — maybe the organiser will try again!</p>
+  <p><a href="${eventsUrl}" style="display:inline-block;background:#6b7280;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600">Browse Events</a></p>
+</div>`.trim();
+  const text = `"${eventTitle}" didn't reach quorum before the deadline. Check out other events: ${eventsUrl}`;
+  return { subject, html, text };
+}

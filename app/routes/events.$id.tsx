@@ -12,6 +12,7 @@ import {
   quorumReachedOrganizerEmail,
   quorumReachedParticipantEmail,
 } from "~/email.server";
+import { expireOverdueEvents } from "~/expiry.server";
 
 function deadlineCountdown(deadline: Date): string {
   const diff = deadline.getTime() - Date.now();
@@ -56,6 +57,17 @@ export async function loader(args: Route.LoaderArgs) {
     throw new Response("Not Found", { status: 404 });
   }
 
+  // On-load expiry detection: if active + deadline passed → mark expired
+  if (row.event.status === "active") {
+    const env = getEnv(context);
+    const baseUrl = new URL(args.request.url).origin;
+    await expireOverdueEvents(db, env, [params.id], baseUrl);
+    // Reload if status changed
+    if (new Date(row.event.deadline) < new Date()) {
+      return redirect(`/events/${params.id}`);
+    }
+  }
+
   const slots = await db
     .select()
     .from(timeSlots)
@@ -66,8 +78,10 @@ export async function loader(args: Route.LoaderArgs) {
   const participants = await db
     .select({
       slotId: commitments.timeSlotId,
+      userId: users.id,
       name: users.fullName,
       avatarUrl: users.avatarUrl,
+      reputationScore: users.reputationScore,
     })
     .from(commitments)
     .innerJoin(users, eq(users.id, commitments.userId))
@@ -680,7 +694,20 @@ export default function EventDetail() {
                                   {p.name[0]?.toUpperCase() ?? "?"}
                                 </span>
                               )}
-                              <span className="participant__name">{p.name}</span>
+                              <a
+                                href={`/users/${p.userId}`}
+                                className="participant__name"
+                              >
+                                {p.name}
+                              </a>
+                              {p.reputationScore !== null &&
+                                p.reputationScore !== undefined && (
+                                  <span className="participant__rep">
+                                    {Math.round(
+                                      Number(p.reputationScore)
+                                    )}%
+                                  </span>
+                                )}
                             </li>
                           ))}
                         </ul>

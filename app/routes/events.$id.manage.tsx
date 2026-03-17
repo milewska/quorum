@@ -1,9 +1,9 @@
-import { and, eq, isNull } from "drizzle-orm";
-import { Form, redirect, useActionData, useLoaderData } from "react-router";
+import { and, eq, inArray, isNull, sql as drizzleSql } from "drizzle-orm";
+import { Form, redirect, useActionData, useFetcher, useLoaderData } from "react-router";
 import { requireUser } from "~/auth.server";
 import { getEnv } from "~/env.server";
 import { getDb } from "../../db";
-import { commitments, events, timeSlots, users } from "../../db/schema";
+import { attendance, commitments, events, timeSlots, users } from "../../db/schema";
 import { eventConfirmedEmail, sendMail } from "~/email.server";
 import type { Route } from "./+types/events.$id.manage";
 
@@ -42,10 +42,11 @@ export async function loader(args: Route.LoaderArgs) {
     .where(eq(timeSlots.eventId, params.id))
     .orderBy(timeSlots.startsAt);
 
-  // Load committed participant counts per slot (for display)
+  // Load committed participants per slot (with userId for attendance tracking)
   const participantRows = await db
     .select({
       slotId: commitments.timeSlotId,
+      userId: users.id,
       name: users.fullName,
       email: users.email,
     })
@@ -56,16 +57,28 @@ export async function loader(args: Route.LoaderArgs) {
     )
     .orderBy(commitments.createdAt);
 
-  const participantsBySlot: Record<string, { name: string; email: string }[]> =
-    {};
+  const participantsBySlot: Record<
+    string,
+    { userId: string; name: string; email: string }[]
+  > = {};
   for (const p of participantRows) {
     (participantsBySlot[p.slotId] ??= []).push({
+      userId: p.userId,
       name: p.name,
       email: p.email,
     });
   }
 
-  return { event: row, slots, participantsBySlot };
+  // Attendance records for this event (userId -> registered)
+  const attendanceRows = await db
+    .select({ userId: attendance.userId, registered: attendance.registered })
+    .from(attendance)
+    .where(eq(attendance.eventId, params.id));
+  const attendanceMap: Record<string, boolean> = Object.fromEntries(
+    attendanceRows.map((r) => [r.userId, r.registered])
+  );
+
+  return { event: row, slots, participantsBySlot, attendanceMap };
 }
 
 // ─── Action ───────────────────────────────────────────────────────────────────
@@ -170,6 +183,97 @@ export async function action(args: Route.ActionArgs) {
     return redirect(`/events/${params.id}/manage`);
   }
 
+  if (intent === "mark_attendance") {
+    const targetUserId = form.get("userId") as string;
+    const registered = form.get("registered") === "true";
+    if (!targetUserId) return { error: "Missing userId." };
+
+    const [existing] = await db
+      .select({ id: attendance.id })
+      .from(attendance)
+      .where(
+        and(
+          eq(attendance.userId, targetUserId),
+          eq(attendance.eventId, params.id)
+        )
+      )
+      .limit(1);
+
+    if (existing) {
+      await db
+        .update(attendance)
+        .set({ registered, markedAt: new Date() })
+        .where(eq(attendance.id, existing.id));
+    } else {
+      await db.insert(attendance).values({
+        userId: targetUserId,
+        eventId: params.id,
+        registered,
+        markedAt: new Date(),
+      });
+    }
+    return { ok: true };
+  }
+
+  if (intent === "complete_event") {
+    if (event.status !== "confirmed") {
+      return { error: "Event must be confirmed before it can be completed." };
+    }
+
+    // Mark event as completed
+    await db
+      .update(events)
+      .set({ status: "completed", updatedAt: new Date() })
+      .where(eq(events.id, params.id));
+
+    // Recalculate reputation for all participants who committed to this event
+    const committedUsers = await db
+      .selectDistinct({ userId: commitments.userId })
+      .from(commitments)
+      .where(
+        and(eq(commitments.eventId, params.id), isNull(commitments.withdrawnAt))
+      );
+
+    for (const { userId } of committedUsers) {
+      // Count distinct confirmed/completed events they committed to
+      const [committedRow] = await db
+        .select({
+          count: drizzleSql<number>`count(distinct ${commitments.eventId})`,
+        })
+        .from(commitments)
+        .innerJoin(events, eq(events.id, commitments.eventId))
+        .where(
+          and(
+            eq(commitments.userId, userId),
+            isNull(commitments.withdrawnAt),
+            inArray(events.status, ["confirmed", "completed"])
+          )
+        );
+
+      // Count events they registered for
+      const [registeredRow] = await db
+        .select({ count: drizzleSql<number>`count(*)` })
+        .from(attendance)
+        .where(
+          and(eq(attendance.userId, userId), eq(attendance.registered, true))
+        );
+
+      const committedToConfirmed = Number(committedRow?.count ?? 0);
+      const registeredCount = Number(registeredRow?.count ?? 0);
+      const newScore =
+        committedToConfirmed > 0
+          ? Math.round((registeredCount / committedToConfirmed) * 100)
+          : 100;
+
+      await db
+        .update(users)
+        .set({ reputationScore: String(newScore) })
+        .where(eq(users.id, userId));
+    }
+
+    return redirect(`/events/${params.id}/manage`);
+  }
+
   return { error: "Unknown action." };
 }
 
@@ -194,12 +298,25 @@ function fmt(date: string | Date) {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function ManageEvent() {
-  const { event, slots, participantsBySlot } = useLoaderData<typeof loader>();
+  const { event, slots, participantsBySlot, attendanceMap } =
+    useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
+  const attendanceFetcher = useFetcher();
 
   const quorumSlots = slots.filter((s) => s.status === "quorum_reached");
   const confirmedSlots = slots.filter((s) => s.status === "confirmed");
   const activeSlots = slots.filter((s) => s.status === "active");
+
+  // Optimistic attendance state
+  const optimisticAttendance: Record<string, boolean> = { ...attendanceMap };
+  if (
+    attendanceFetcher.state !== "idle" &&
+    attendanceFetcher.formData?.get("intent") === "mark_attendance"
+  ) {
+    const uid = attendanceFetcher.formData.get("userId") as string;
+    const reg = attendanceFetcher.formData.get("registered") === "true";
+    if (uid) optimisticAttendance[uid] = reg;
+  }
 
   return (
     <section className="page-section">
@@ -310,11 +427,18 @@ export default function ManageEvent() {
             <h2 className="manage-section__title">
               ✅ Confirmed ({confirmedSlots.length})
             </h2>
+            <p className="manage-section__desc">
+              Mark which participants actually registered. This updates their
+              reputation score when you complete the event.
+            </p>
             <ul className="manage-slot-list">
               {confirmedSlots.map((slot) => {
                 const participants = participantsBySlot[slot.id] ?? [];
                 return (
-                  <li key={slot.id} className="manage-slot-card manage-slot-card--confirmed">
+                  <li
+                    key={slot.id}
+                    className="manage-slot-card manage-slot-card--confirmed"
+                  >
                     <div className="manage-slot-card__time">
                       <strong>{fmt(slot.startsAt)}</strong>
                       <span className="manage-slot-card__dash">&ndash;</span>
@@ -341,16 +465,82 @@ export default function ManageEvent() {
                       </p>
                     )}
                     {participants.length > 0 && (
-                      <ul className="manage-participant-list">
-                        {participants.map((p, i) => (
-                          <li key={i}>{p.name}</li>
-                        ))}
-                      </ul>
+                      <div className="manage-attendance">
+                        <p className="manage-attendance__label">
+                          Attendance — check participants who registered:
+                        </p>
+                        <ul className="manage-attendance-list">
+                          {participants.map((p) => {
+                            const checked =
+                              optimisticAttendance[p.userId] ?? false;
+                            return (
+                              <li
+                                key={p.userId}
+                                className="manage-attendance-item"
+                              >
+                                <attendanceFetcher.Form
+                                  method="post"
+                                  className="manage-attendance-form"
+                                >
+                                  <input
+                                    type="hidden"
+                                    name="intent"
+                                    value="mark_attendance"
+                                  />
+                                  <input
+                                    type="hidden"
+                                    name="userId"
+                                    value={p.userId}
+                                  />
+                                  <input
+                                    type="hidden"
+                                    name="registered"
+                                    value={String(!checked)}
+                                  />
+                                  <button
+                                    type="submit"
+                                    className={`manage-attendance-btn${checked ? " manage-attendance-btn--checked" : ""}`}
+                                    title={
+                                      checked
+                                        ? "Mark as not registered"
+                                        : "Mark as registered"
+                                    }
+                                  >
+                                    {checked ? "✓" : "○"}
+                                  </button>
+                                </attendanceFetcher.Form>
+                                <span className="manage-attendance-name">
+                                  {p.name}
+                                </span>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
                     )}
                   </li>
                 );
               })}
             </ul>
+
+            {/* Complete Event */}
+            {event.status === "confirmed" && (
+              <Form method="post" className="manage-complete-form">
+                <input type="hidden" name="intent" value="complete_event" />
+                <p className="manage-complete-form__desc">
+                  Once you've marked attendance, complete the event to lock in
+                  reputation scores for all participants.
+                </p>
+                <button type="submit" className="btn btn--success">
+                  Complete Event
+                </button>
+              </Form>
+            )}
+            {event.status === "completed" && (
+              <p className="manage-complete-done">
+                🎊 Event completed — reputation scores have been updated.
+              </p>
+            )}
           </div>
         )}
 
