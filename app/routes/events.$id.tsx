@@ -1,6 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
-import { Link, useLoaderData } from "react-router";
-import { getOptionalUser } from "~/auth.server";
+import { Link, redirect, useFetcher, useLoaderData } from "react-router";
+import { getOptionalUser, requireUser } from "~/auth.server";
 import { getEnv } from "~/env.server";
 import { getDb } from "../../db";
 import { commitments, events, timeSlots, users } from "../../db/schema";
@@ -31,6 +31,7 @@ export async function loader(args: Route.LoaderArgs) {
   const row = rows[0];
 
   const authUser = await getOptionalUser(args);
+  let dbUserId: string | null = null;
   let isOrganizer = false;
   if (authUser) {
     const [dbUser] = await db
@@ -38,7 +39,10 @@ export async function loader(args: Route.LoaderArgs) {
       .from(users)
       .where(eq(users.workosUserId, authUser.id))
       .limit(1);
-    isOrganizer = dbUser?.id === row?.event.organizerId;
+    if (dbUser) {
+      dbUserId = dbUser.id;
+      isOrganizer = dbUser.id === row?.event.organizerId;
+    }
   }
 
   if (!row || (row.event.status === "draft" && !isOrganizer)) {
@@ -61,12 +65,25 @@ export async function loader(args: Route.LoaderArgs) {
     .from(commitments)
     .innerJoin(users, eq(users.id, commitments.userId))
     .where(
-      and(
-        eq(commitments.eventId, params.id),
-        isNull(commitments.withdrawnAt)
-      )
+      and(eq(commitments.eventId, params.id), isNull(commitments.withdrawnAt))
     )
     .orderBy(commitments.createdAt);
+
+  // Current user's active commitments (slot IDs they've committed to)
+  const myCommittedSlotIds: string[] = dbUserId
+    ? (
+        await db
+          .select({ timeSlotId: commitments.timeSlotId })
+          .from(commitments)
+          .where(
+            and(
+              eq(commitments.userId, dbUserId),
+              eq(commitments.eventId, params.id),
+              isNull(commitments.withdrawnAt)
+            )
+          )
+      ).map((r) => r.timeSlotId)
+    : [];
 
   return {
     event: row.event,
@@ -74,7 +91,112 @@ export async function loader(args: Route.LoaderArgs) {
     slots,
     participants,
     isOrganizer,
+    isSignedIn: authUser !== null,
+    myCommittedSlotIds,
   };
+}
+
+// ─── Action (commit / withdraw) ───────────────────────────────────────────────
+
+export async function action(args: Route.ActionArgs) {
+  const { params, request, context } = args;
+  const db = getDb(getEnv(context));
+  const auth = await requireUser(args);
+  const workosId = auth.user.id;
+
+  // Resolve DB user
+  const [dbUser] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.workosUserId, workosId))
+    .limit(1);
+  if (!dbUser) throw new Response("User not found", { status: 404 });
+
+  const form = await request.formData();
+  const intent = form.get("intent") as string;
+  const slotId = form.get("slotId") as string;
+  if (!slotId) throw new Response("Missing slotId", { status: 400 });
+
+  // Verify the slot belongs to this event
+  const [slot] = await db
+    .select()
+    .from(timeSlots)
+    .where(and(eq(timeSlots.id, slotId), eq(timeSlots.eventId, params.id)))
+    .limit(1);
+  if (!slot) throw new Response("Slot not found", { status: 404 });
+
+  // Verify the user is not the organizer
+  const [eventRow] = await db
+    .select({ organizerId: events.organizerId })
+    .from(events)
+    .where(eq(events.id, params.id))
+    .limit(1);
+  if (!eventRow) throw new Response("Event not found", { status: 404 });
+  if (eventRow.organizerId === dbUser.id) {
+    throw new Response("Organizers cannot commit to their own event", {
+      status: 403,
+    });
+  }
+
+  if (intent === "commit") {
+    // Check for an existing active commitment
+    const [existing] = await db
+      .select({ id: commitments.id })
+      .from(commitments)
+      .where(
+        and(
+          eq(commitments.userId, dbUser.id),
+          eq(commitments.timeSlotId, slotId),
+          isNull(commitments.withdrawnAt)
+        )
+      )
+      .limit(1);
+    if (!existing) {
+      // Insert commitment and increment counter
+      await db.insert(commitments).values({
+        userId: dbUser.id,
+        timeSlotId: slotId,
+        eventId: params.id,
+      });
+      await db
+        .update(timeSlots)
+        .set({ commitmentCount: slot.commitmentCount + 1 })
+        .where(eq(timeSlots.id, slotId));
+    }
+  } else if (intent === "withdraw") {
+    // Only allow withdrawal if slot is not quorum_reached / confirmed
+    if (slot.status === "quorum_reached" || slot.status === "confirmed") {
+      throw new Response("Cannot withdraw after quorum is reached", {
+        status: 403,
+      });
+    }
+    // Find active commitment
+    const [existing] = await db
+      .select({ id: commitments.id })
+      .from(commitments)
+      .where(
+        and(
+          eq(commitments.userId, dbUser.id),
+          eq(commitments.timeSlotId, slotId),
+          isNull(commitments.withdrawnAt)
+        )
+      )
+      .limit(1);
+    if (existing) {
+      await db
+        .update(commitments)
+        .set({ withdrawnAt: new Date() })
+        .where(eq(commitments.id, existing.id));
+      await db
+        .update(timeSlots)
+        .set({
+          commitmentCount: Math.max(0, slot.commitmentCount - 1),
+        })
+        .where(eq(timeSlots.id, slotId));
+    }
+  }
+
+  return redirect(`/events/${params.id}`);
 }
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
@@ -88,22 +210,106 @@ const STATUS_LABEL: Record<string, string> = {
   expired: "Expired",
 };
 
+// ─── Commit / Withdraw button ─────────────────────────────────────────────────
+
+function CommitButton({
+  slotId,
+  slotStatus,
+  committed,
+  isSignedIn,
+  isOrganizer,
+  deadlinePassed,
+}: {
+  slotId: string;
+  slotStatus: string;
+  committed: boolean;
+  isSignedIn: boolean;
+  isOrganizer: boolean;
+  deadlinePassed: boolean;
+}) {
+  const fetcher = useFetcher();
+  const pending = fetcher.state !== "idle";
+
+  if (isOrganizer) return null;
+
+  if (!isSignedIn) {
+    return (
+      <a href="/auth/login" className="btn btn--primary btn--sm">
+        Sign in to commit
+      </a>
+    );
+  }
+
+  const locked =
+    slotStatus === "quorum_reached" || slotStatus === "confirmed";
+
+  if (committed) {
+    return (
+      <div className="slot-card__commit-row">
+        <span className="slot-card__committed-badge">✓ Committed</span>
+        {locked || deadlinePassed ? (
+          <span className="slot-card__locked-note">
+            {locked ? "Withdrawal locked — quorum reached" : "Deadline passed"}
+          </span>
+        ) : (
+          <fetcher.Form method="post">
+            <input type="hidden" name="intent" value="withdraw" />
+            <input type="hidden" name="slotId" value={slotId} />
+            <button
+              type="submit"
+              className="btn btn--ghost btn--sm"
+              disabled={pending}
+            >
+              {pending ? "Withdrawing…" : "Withdraw"}
+            </button>
+          </fetcher.Form>
+        )}
+      </div>
+    );
+  }
+
+  if (deadlinePassed || locked) return null;
+
+  return (
+    <fetcher.Form method="post">
+      <input type="hidden" name="intent" value="commit" />
+      <input type="hidden" name="slotId" value={slotId} />
+      <button
+        type="submit"
+        className="btn btn--primary btn--sm"
+        disabled={pending}
+      >
+        {pending ? "Committing…" : "Commit to this slot"}
+      </button>
+    </fetcher.Form>
+  );
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function EventDetail() {
-  const { event, organizerName, slots, participants, isOrganizer } =
-    useLoaderData<typeof loader>();
+  const {
+    event,
+    organizerName,
+    slots,
+    participants,
+    isOrganizer,
+    isSignedIn,
+    myCommittedSlotIds,
+  } = useLoaderData<typeof loader>();
 
   const deadlineDate = new Date(event.deadline);
   const countdown = deadlineCountdown(deadlineDate);
+  const deadlinePassed = deadlineDate.getTime() <= Date.now();
 
   // Group participants by slot id
-  const bySlot = participants.reduce<
-    Record<string, typeof participants>
-  >((acc, p) => {
-    (acc[p.slotId] ??= []).push(p);
-    return acc;
-  }, {});
+  const bySlot = participants.reduce<Record<string, typeof participants>>(
+    (acc, p) => {
+      (acc[p.slotId] ??= []).push(p);
+      return acc;
+    },
+    {}
+  );
 
   return (
     <section className="page-section">
@@ -172,6 +378,7 @@ export default function EventDetail() {
                   (slot.commitmentCount / event.threshold) * 100
                 );
                 const slotParticipants = bySlot[slot.id] ?? [];
+                const committed = myCommittedSlotIds.includes(slot.id);
                 return (
                   <li key={slot.id} className="slot-card">
                     <div className="slot-card__time">
@@ -191,6 +398,11 @@ export default function EventDetail() {
                           minute: "2-digit",
                         })}
                       </span>
+                      {slot.status !== "active" && (
+                        <span className={`badge badge--${slot.status}`}>
+                          {STATUS_LABEL[slot.status] ?? slot.status}
+                        </span>
+                      )}
                     </div>
 
                     <div className="slot-card__progress">
@@ -204,6 +416,15 @@ export default function EventDetail() {
                         {slot.commitmentCount} / {event.threshold} committed
                       </span>
                     </div>
+
+                    <CommitButton
+                      slotId={slot.id}
+                      slotStatus={slot.status}
+                      committed={committed}
+                      isSignedIn={isSignedIn}
+                      isOrganizer={isOrganizer}
+                      deadlinePassed={deadlinePassed}
+                    />
 
                     {slotParticipants.length > 0 && (
                       <div className="slot-card__participants">
