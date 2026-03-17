@@ -1,4 +1,6 @@
+import { useRouteLoaderData } from "react-router";
 import type { MetaFunction } from "react-router";
+import type { loader as rootLoader } from "~/root";
 
 export const meta: MetaFunction = () => [
   { title: "Quorum — Events that happen when enough people say yes" },
@@ -46,6 +48,9 @@ const BENEFITS = [
 ];
 
 export default function Index() {
+  const auth = useRouteLoaderData<typeof rootLoader>("root");
+  const isSignedIn = Boolean(auth?.user);
+  const createHref = isSignedIn ? "/events/new" : "/auth/login";
   return (
     <div className="home-page">
       {/* ── Hero ─────────────────────────────────────────────────────── */}
@@ -64,7 +69,7 @@ export default function Index() {
             <a href="/events" className="btn btn--primary btn--lg">
               Browse events
             </a>
-            <a href="/auth/login" className="btn btn--outline btn--lg">
+            <a href={createHref} className="btn btn--outline btn--lg">
               Create an event
             </a>
           </div>
@@ -142,7 +147,7 @@ export default function Index() {
             <a href="/events" className="btn btn--primary btn--lg">
               See what's happening
             </a>
-            <a href="/auth/login" className="btn btn--white btn--lg">
+            <a href={createHref} className="btn btn--white btn--lg">
               Start planning
             </a>
           </div>
