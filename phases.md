@@ -225,3 +225,34 @@
 **Human input:** Logo / brand assets if available (otherwise ships with text placeholder).
 
 **Done when:** All pages render correctly on mobile and desktop, errors show friendly messages, emails look good, SEO tags are present, and a full end-to-end walkthrough (create → commit → quorum → confirm → complete) succeeds on production at `quorum.malamaconsulting.com`.
+
+---
+
+## Phase 11: Series / Multi-Meeting Events
+
+**Delivers:** Organizers can create a recurring event series (e.g., "5-week photography workshop") and offer 2–3 weekly time-slot options (e.g., "Tuesdays 7–9 PM" or "Thursdays 7–9 PM"). Participants commit to the whole series under one preferred option. Quorum fires per option when the threshold is met — meaning enough people can all make the same recurring time.
+
+**Schema changes:**
+
+- Add `seriesSessionCount` (`integer`, nullable) to `events` — `null` = single event (backwards-compatible), `≥2` = series
+- Add new `seriesOptions` table: `id`, `eventId`, `label` (e.g., "Option A: Tuesdays 7–9 PM"), `createdAt`
+- Add `seriesOptionId` (FK → `seriesOptions.id`, nullable) to `timeSlots` — all slots belonging to the same recurring option share this FK
+- Add `seriesOptionId` (FK → `seriesOptions.id`, nullable) to `commitments` — a series commitment is recorded once per option rather than once per slot
+
+**Tasks:**
+
+- [ ] Write and run DB migration for the three schema changes above
+- [ ] Update `/events/new` form: add "Series event?" toggle; when enabled show "Number of sessions" input and an option builder (add up to 3 options, each with a recurring day-of-week + start time + end time + auto-generated label)
+- [ ] Server action for event creation: when `seriesSessionCount` is set, generate concrete `timeSlot` rows for each option × each session (e.g., 2 options × 5 weeks = 10 rows), all with the same `seriesOptionId` per group; insert `seriesOptions` rows first, then slots with FK references
+- [ ] Update `/events/:id/edit` to support editing series options (replace-all pattern, same as current slot editing)
+- [ ] Update `/events/:id` detail page: for series events, group time slots by `seriesOptionId`, show one option card per group with its label, aggregate committed count, and a progress bar toward threshold; hide per-slot breakdown by default (expandable)
+- [ ] Update commitment action: committing to a series option inserts a single `commitments` row with `seriesOptionId` set (and no `timeSlotId`); prevent duplicate series commitments (same user + same `seriesOptionId`)
+- [ ] Update quorum-detection logic (Phase 6): for series events, quorum on an option = `COUNT(active commitments WHERE seriesOptionId = ?) >= event.threshold`; update `seriesOption` status (add `status` field to `seriesOptions` table) and — if this is the first option to reach quorum — set `event.status = 'quorum_reached'`
+- [ ] Update organizer confirmation flow (Phase 7): on the manage page show options grouped by status; "Confirm" action selects one option as the winning time, marks others as `cancelled`, stores `registrationUrl`, and emails committed participants with the confirmed weekly schedule
+- [ ] Update withdrawal: withdrawing from a series removes the single `commitments` row for that `seriesOptionId`; revert quorum status if count drops below threshold (same as Phase 6 edge case)
+- [ ] Update dashboard (Phase 8): participant's commitment list shows series events as a single row with the option label and session count (e.g., "5 sessions — Tuesdays 7–9 PM")
+- [ ] Backwards-compatible: all existing single-event logic paths are untouched when `seriesSessionCount` is null
+
+**Human input:** None.
+
+**Done when:** An organizer can create a 5-week series offering two time options, participants can commit to one option, quorum fires when the threshold is met on an option, the organizer can confirm the winning option, and committed participants receive an email with the full recurring schedule.
