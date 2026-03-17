@@ -14,6 +14,9 @@ export default [
   route("events/:id", "routes/events.$id.tsx"),
   route("events/:id/edit", "routes/events.$id.edit.tsx"),
 
+  // Dashboard
+  route("dashboard", "routes/dashboard.tsx"),
+
   // R2 image proxy
   route("images/*", "routes/images.$.tsx"),
 ] satisfies RouteConfig;

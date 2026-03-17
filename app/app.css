@@ -184,6 +184,130 @@ a {
   transition: opacity 0.15s ease;
 }
 
+/* ─── Dashboard ─────────────────────────────────────────────────────────────── */
+.dash__title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 2rem;
+}
+
+.dash-section {
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.dash-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+  gap: 1rem;
+}
+
+.dash-section__title {
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+.dash-empty {
+  color: var(--color-muted);
+  font-size: 0.9375rem;
+}
+
+.dash-empty a {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
+.dash-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.dash-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+@media (max-width: 640px) {
+  .dash-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dash-row__primary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.dash-row__title {
+  font-weight: 600;
+  font-size: 0.9375rem;
+  color: var(--color-text);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dash-row__title:hover {
+  text-decoration: underline;
+  color: var(--color-primary);
+}
+
+.dash-row__meta {
+  font-size: 0.8125rem;
+  color: var(--color-muted);
+}
+
+.dash-row__secondary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.dash-row__date {
+  font-size: 0.8125rem;
+  color: var(--color-muted);
+  white-space: nowrap;
+}
+
+.dash-row__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dash-row__withdraw {
+  color: #ef4444;
+  border-color: #fecaca;
+}
+
+.dash-row__withdraw:hover {
+  background: #fee2e2;
+}
+
+.dash-row__locked {
+  font-size: 0.8rem;
+  color: var(--color-muted);
+  font-style: italic;
+}
+
 /* ─── Marketing home page ─────────────────────────────────────────────────── */
 
 /* Let the home page break out of site-main's padding/max-width */
