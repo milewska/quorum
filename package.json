@@ -12,7 +12,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "db:seed": "tsx db/seed.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^0.10.4",
@@ -31,7 +32,9 @@
     "@react-router/dev": "^7.5.0",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
+    "dotenv": "^17.3.1",
     "drizzle-kit": "^0.30.6",
+    "tsx": "^4.21.0",
     "typescript": "^5.7.3",
     "vite": "^6.0.11",
     "vite-tsconfig-paths": "^5.1.4",
