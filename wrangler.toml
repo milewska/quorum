@@ -6,14 +6,22 @@ compatibility_date = "2025-03-16"
 compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = "./build/client"
 
+# D1 database (create with: wrangler d1 create quorum-db)
+[[d1_databases]]
+binding = "DB"
+database_name = "quorum-db"
+database_id = "01e6a6b4-6b15-4fb1-8474-2c4dd53dc60a"
+migrations_dir = "db/d1-migrations"
+
 # R2 bucket for event cover images
 [[r2_buckets]]
 binding = "IMAGES"
 bucket_name = "quorum-images"
 
 # Secrets (set via `wrangler pages secret put <KEY>` or the CF dashboard):
-#   DATABASE_URL
 #   WORKOS_API_KEY
 #   WORKOS_CLIENT_ID
+#   WORKOS_REDIRECT_URI
 #   RESEND_API_KEY
 #   SESSION_SECRET
+# Note: DATABASE_URL is no longer needed — D1 replaces Neon

@@ -1,129 +1,130 @@
 import {
-  boolean,
-  decimal,
   integer,
-  pgEnum,
-  pgTable,
+  real,
+  sqliteTable,
   text,
-  timestamp,
-  uuid,
-} from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+} from "drizzle-orm/sqlite-core";
+import { relations, sql } from "drizzle-orm";
 
-// ─── Enums ────────────────────────────────────────────────────────────────────
-
-export const visibilityEnum = pgEnum("visibility", ["public", "private"]);
-
-export const eventStatusEnum = pgEnum("event_status", [
-  "draft",
-  "active",
-  "quorum_reached",
-  "confirmed",
-  "completed",
-  "expired",
-]);
-
-export const slotStatusEnum = pgEnum("slot_status", [
-  "active",
-  "quorum_reached",
-  "confirmed",
-]);
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+// D1 is SQLite — no native UUID, ENUM, TIMESTAMP, or DECIMAL types.
+// UUIDs stored as TEXT, enums as TEXT with runtime validation,
+// timestamps as TEXT (ISO 8601), decimals as REAL.
 
 // ─── Users ────────────────────────────────────────────────────────────────────
 
-export const users = pgTable("users", {
-  id: uuid("id").primaryKey().defaultRandom(),
+export const users = sqliteTable("users", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
   fullName: text("full_name").notNull(),
   email: text("email").notNull().unique(),
   avatarUrl: text("avatar_url"),
-  // Percentage (0–100). Calculated as: registered / committed-to-confirmed-events * 100
-  reputationScore: decimal("reputation_score", { precision: 5, scale: 2 })
-    .notNull()
-    .default("100.00"),
-  // WorkOS user ID for linking OAuth profiles
+  // Percentage (0–100). Calculated as: registered / committed-to-confirmed * 100
+  reputationScore: real("reputation_score").notNull().default(100.0),
+  // WorkOS user ID for linking OAuth profiles (kept for future SSO)
+  // Also doubles as Google OAuth sub ID after QUOR-1 migration
   workosUserId: text("workos_user_id").notNull().unique(),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
 });
 
 // ─── Events ───────────────────────────────────────────────────────────────────
 
-export const events = pgTable("events", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  organizerId: uuid("organizer_id")
+export const events = sqliteTable("events", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  organizerId: text("organizer_id")
     .notNull()
     .references(() => users.id),
   title: text("title").notNull(),
   description: text("description").notNull(),
-  // Free-text city/region for display and ILIKE filtering
+  // Free-text city/region for display and LIKE filtering
   location: text("location").notNull(),
-  // R2 object key (not full URL — constructed at render time)
+  // R2 object key or external image URL
   imageKey: text("image_key"),
-  visibility: visibilityEnum("visibility").notNull().default("public"),
+  // 'public' | 'private'
+  visibility: text("visibility").notNull().default("public"),
   // Minimum number of commitments on a single slot to reach quorum
   threshold: integer("threshold").notNull(),
-  // Organizer-set deadline; server enforces max 90 days from creation
-  deadline: timestamp("deadline").notNull(),
-  // Populated when organizer confirms; points to external registration page
+  // ISO 8601 deadline; max 90 days from creation
+  deadline: text("deadline").notNull(),
+  // External registration URL — populated when organizer confirms
   registrationUrl: text("registration_url"),
   // JSON array of { label: string, amount: number (cents, 0=free) }. Null = free event.
   costTiersJson: text("cost_tiers_json"),
-  // When set, quorum is determined by total pledged $ amount instead of headcount.
-  // Null = headcount quorum (threshold). Non-null = price quorum (cents target).
+  // When set, quorum is by total pledged $ instead of headcount. Null = headcount.
   priceQuorumCents: integer("price_quorum_cents"),
-  status: eventStatusEnum("status").notNull().default("draft"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  // 'draft' | 'active' | 'quorum_reached' | 'confirmed' | 'completed' | 'expired'
+  status: text("status").notNull().default("draft"),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+  updatedAt: text("updated_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
 });
 
 // ─── Time Slots ───────────────────────────────────────────────────────────────
 
-export const timeSlots = pgTable("time_slots", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  eventId: uuid("event_id")
+export const timeSlots = sqliteTable("time_slots", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  eventId: text("event_id")
     .notNull()
     .references(() => events.id, { onDelete: "cascade" }),
-  startsAt: timestamp("starts_at").notNull(),
-  endsAt: timestamp("ends_at").notNull(),
+  startsAt: text("starts_at").notNull(),
+  endsAt: text("ends_at").notNull(),
   // Denormalized counter — kept in sync via transaction on commit/withdraw
   commitmentCount: integer("commitment_count").notNull().default(0),
-  status: slotStatusEnum("status").notNull().default("active"),
+  // 'active' | 'quorum_reached' | 'confirmed'
+  status: text("status").notNull().default("active"),
 });
 
 // ─── Commitments ──────────────────────────────────────────────────────────────
 
-export const commitments = pgTable("commitments", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id")
+export const commitments = sqliteTable("commitments", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  userId: text("user_id")
     .notNull()
     .references(() => users.id),
-  timeSlotId: uuid("time_slot_id")
+  timeSlotId: text("time_slot_id")
     .notNull()
     .references(() => timeSlots.id, { onDelete: "cascade" }),
   // Denormalized for efficient dashboard queries
-  eventId: uuid("event_id")
+  eventId: text("event_id")
     .notNull()
     .references(() => events.id, { onDelete: "cascade" }),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
   // Soft-delete for withdrawal. Null = active commitment.
-  withdrawnAt: timestamp("withdrawn_at"),
-  // Which pricing tier the committer chose (null for free events).
+  withdrawnAt: text("withdrawn_at"),
+  // Which pricing tier the committer chose (null for free events)
   tierLabel: text("tier_label"),
   tierAmount: integer("tier_amount"),
 });
 
 // ─── Attendance ───────────────────────────────────────────────────────────────
 
-export const attendance = pgTable("attendance", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id")
+export const attendance = sqliteTable("attendance", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  userId: text("user_id")
     .notNull()
     .references(() => users.id),
-  eventId: uuid("event_id")
+  eventId: text("event_id")
     .notNull()
     .references(() => events.id, { onDelete: "cascade" }),
-  // True = organizer confirmed this participant registered for the event
-  registered: boolean("registered").notNull().default(false),
-  markedAt: timestamp("marked_at"),
+  // 1 = organizer confirmed this participant registered
+  registered: integer("registered", { mode: "boolean" }).notNull().default(false),
+  markedAt: text("marked_at"),
 });
 
 // ─── Relations ────────────────────────────────────────────────────────────────

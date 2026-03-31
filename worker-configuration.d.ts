@@ -3,8 +3,10 @@
 // automatically see the typed Env interface via AppLoadContext.
 
 interface Env {
+  // D1 database binding
+  DB: D1Database;
+
   // Secrets (set in Cloudflare dashboard or via `wrangler pages secret put`)
-  DATABASE_URL: string;
   WORKOS_API_KEY: string;
   WORKOS_CLIENT_ID: string;
   WORKOS_REDIRECT_URI: string;

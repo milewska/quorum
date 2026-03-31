@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ilike, sql } from "drizzle-orm";
+import { and, asc, desc, eq, like, sql } from "drizzle-orm";
 import { Form, Link, useLoaderData } from "react-router";
 import { getDb } from "../../db";
 import { events, timeSlots } from "../../db/schema";
@@ -35,7 +35,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const conditions = [
     eq(events.status, "active"),
     eq(events.visibility, "public"),
-    ...(q ? [ilike(events.location, `%${q}%`)] : []),
+    ...(q ? [like(events.location, `%${q}%`)] : []),
   ];
 
   // Max commitment count across all slots for each event (for sort)
