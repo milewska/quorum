@@ -1,4 +1,6 @@
 import {
+  isRouteErrorResponse,
+  Link,
   Links,
   Meta,
   Outlet,
@@ -6,14 +8,25 @@ import {
   ScrollRestoration,
   useLoaderData,
   useNavigation,
+  useRouteError,
 } from "react-router";
-import type { LinksFunction } from "react-router";
+import type { LinksFunction, MetaFunction } from "react-router";
 import { getSession } from "~/auth.server";
 import appStylesHref from "./app.css?url";
 import type { Route } from "./+types/root";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: appStylesHref },
+  { rel: "icon", href: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>Q</text></svg>" },
+];
+
+export const meta: MetaFunction = () => [
+  { charSet: "utf-8" },
+  { property: "og:site_name", content: "Quorum" },
+  { property: "og:type", content: "website" },
+  { property: "og:locale", content: "en_US" },
+  { name: "twitter:card", content: "summary_large_image" },
+  { name: "theme-color", content: "#4f46e5" },
 ];
 
 export async function loader({ request, context }: Route.LoaderArgs) {
@@ -46,12 +59,23 @@ export default function App() {
   const isNavigating = navigation.state !== "idle";
 
   return (
-    <div id="app" data-navigating={isNavigating || undefined}>
+    <div id="app">
+      {/* Loading bar */}
+      {isNavigating && (
+        <div
+          className="nav-loading-bar"
+          style={{ width: navigation.state === "loading" ? "80%" : "30%" }}
+        />
+      )}
+
       <header className="site-header">
         <nav className="site-header__nav">
           <a href="/" className="site-header__logo">
             Quorum
           </a>
+          <div className="site-header__links">
+            <a href="/events" className="site-header__link">Events</a>
+          </div>
           <div className="site-header__actions">
             {user ? (
               <>
@@ -93,20 +117,49 @@ export default function App() {
 
       <footer className="site-footer">
         <p className="site-footer__copy">
-          &copy; {new Date().getFullYear()} Quorum
-        </p>
-        <p className="site-footer__build">
-          v{__APP_VERSION__} &middot; deployed{" "}
-          {new Date(__BUILD_TIME__).toLocaleString("en-US", {
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-            hour: "numeric",
-            minute: "2-digit",
-            timeZoneName: "short",
-          })}
+          &copy; {new Date().getFullYear()} Quorum &middot; Built in Hawai'i
         </p>
       </footer>
+    </div>
+  );
+}
+
+// ─── Error Boundary ──────────────────────────────────────────────────────────
+
+export function ErrorBoundary() {
+  const error = useRouteError();
+
+  let status = 500;
+  let title = "Something went wrong";
+  let message = "An unexpected error occurred. Please try again.";
+
+  if (isRouteErrorResponse(error)) {
+    status = error.status;
+    if (status === 404) {
+      title = "Page not found";
+      message = "The page you're looking for doesn't exist or has been moved.";
+    } else if (status === 403) {
+      title = "Access denied";
+      message = "You don't have permission to view this page.";
+    } else if (status === 401) {
+      title = "Sign in required";
+      message = "You need to sign in to access this page.";
+    }
+  }
+
+  return (
+    <div className="error-page">
+      <p className="error-page__code">{status}</p>
+      <h1 className="error-page__title">{title}</h1>
+      <p className="error-page__message">{message}</p>
+      <div style={{ display: "flex", gap: "0.75rem" }}>
+        <Link to="/" className="btn btn--primary">
+          Go home
+        </Link>
+        <Link to="/events" className="btn btn--ghost">
+          Browse events
+        </Link>
+      </div>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { Link, redirect, useFetcher, useLoaderData } from "react-router";
+import type { MetaFunction } from "react-router";
 import { useState } from "react";
 import { getSession, requireSession } from "~/auth.server";
 import { getEnv } from "~/env.server";
@@ -14,6 +15,31 @@ import {
   quorumReachedParticipantEmail,
 } from "~/email.server";
 import { expireOverdueEvents } from "~/expiry.server";
+
+// ─── SEO Meta (Open Graph + Twitter Cards) ───────────────────────────────────
+
+export const meta: MetaFunction<typeof loader> = ({ data }) => {
+  if (!data?.event) {
+    return [{ title: "Event Not Found — Quorum" }];
+  }
+  const ev = data.event;
+  const title = `${ev.title} — Quorum`;
+  const description = `${ev.location} · ${ev.threshold} commitments needed. ${(ev.description ?? "").slice(0, 140)}`;
+  const url = `https://quorum.malamaconsulting.com/events/${ev.id}`;
+  const image = ev.imageKey?.startsWith("https://") ? ev.imageKey : undefined;
+
+  return [
+    { title },
+    { name: "description", content: description },
+    { property: "og:title", content: title },
+    { property: "og:description", content: description },
+    { property: "og:url", content: url },
+    ...(image ? [{ property: "og:image", content: image }] : []),
+    { name: "twitter:title", content: title },
+    { name: "twitter:description", content: description },
+    ...(image ? [{ name: "twitter:image", content: image }] : []),
+  ];
+};
 
 function deadlineCountdown(deadline: Date): string {
   const diff = deadline.getTime() - Date.now();

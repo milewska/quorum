@@ -1,10 +1,18 @@
 import { and, asc, desc, eq, like, sql } from "drizzle-orm";
 import { Form, Link, useLoaderData } from "react-router";
+import type { MetaFunction } from "react-router";
 import { getDb } from "../../db";
 import { events, timeSlots } from "../../db/schema";
 import { getEnv } from "~/env.server";
 import { expireOverdueEvents } from "~/expiry.server";
 import type { Route } from "./+types/events._index";
+
+export const meta: MetaFunction = () => [
+  { title: "Browse Events — Quorum" },
+  { name: "description", content: "Discover potential events near you. Commit to the ones you want to happen." },
+  { property: "og:title", content: "Browse Events — Quorum" },
+  { property: "og:description", content: "Discover potential events near you. Commit to the ones you want to happen." },
+];
 
 type CostTier = { label: string; amount: number };
 
