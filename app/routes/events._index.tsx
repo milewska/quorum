@@ -38,15 +38,12 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     ...(q ? [like(events.location, `%${q}%`)] : []),
   ];
 
-  // Max commitment count across all slots for each event (for sort)
-  const maxCommitsSq = db
-    .select({
-      eventId: timeSlots.eventId,
-      maxCount: sql<number>`max(${timeSlots.commitmentCount})`.as("max_count"),
-    })
-    .from(timeSlots)
-    .groupBy(timeSlots.eventId)
-    .as("max_commits");
+  // Simple query — no joins. Compute max commitments as a scalar subquery.
+  const maxCommitSubquery = sql<number>`coalesce((
+    SELECT max(${timeSlots.commitmentCount})
+    FROM ${timeSlots}
+    WHERE ${timeSlots.eventId} = ${events.id}
+  ), 0)`;
 
   const list = await db
     .select({
@@ -57,14 +54,13 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       threshold: events.threshold,
       imageKey: events.imageKey,
       costTiersJson: events.costTiersJson,
-      maxCommitments: sql<number>`coalesce(${maxCommitsSq.maxCount}, 0)`,
+      maxCommitments: maxCommitSubquery,
     })
     .from(events)
-    .leftJoin(maxCommitsSq, eq(maxCommitsSq.eventId, events.id))
     .where(and(...conditions))
     .orderBy(
       sort === "commitments"
-        ? desc(sql`coalesce(${maxCommitsSq.maxCount}, 0)`)
+        ? desc(maxCommitSubquery)
         : asc(events.deadline)
     )
     .limit(50);

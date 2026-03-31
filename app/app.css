@@ -2028,6 +2028,9 @@ ing (manage page) ───�
   opacity: 0.5;
   cursor: default;
 }
+.commit-slot--readonly {
+  cursor: default;
+}
 .commit-slot__check {
   width: 1.5rem;
   height: 1.5rem;
