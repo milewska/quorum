@@ -1,10 +1,6 @@
-import { redirect } from "react-router";
-import { getSignInUrl } from "@workos-inc/authkit-react-router";
-import { configureAuth } from "~/auth.server";
+import { buildLoginRedirect } from "~/auth.server";
 import type { Route } from "./+types/auth.login";
 
-export async function loader({ context }: Route.LoaderArgs) {
-  configureAuth(context.cloudflare.env);
-  const url = await getSignInUrl();
-  return redirect(url);
+export async function loader({ request, context }: Route.LoaderArgs) {
+  return buildLoginRedirect(request, context.cloudflare.env);
 }

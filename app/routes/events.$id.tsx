@@ -1,7 +1,7 @@
 import { and, eq, isNull, sql as drizzleSql } from "drizzle-orm";
 import { Link, redirect, useFetcher, useLoaderData } from "react-router";
 import { useState } from "react";
-import { getOptionalUser, requireUser } from "~/auth.server";
+import { getSession, requireSession } from "~/auth.server";
 import { getEnv } from "~/env.server";
 import { getDb } from "../../db";
 import { commitments, events, timeSlots, users } from "../../db/schema";
@@ -38,20 +38,9 @@ export async function loader(args: Route.LoaderArgs) {
 
   const row = rows[0];
 
-  const authUser = await getOptionalUser(args);
-  let dbUserId: string | null = null;
-  let isOrganizer = false;
-  if (authUser) {
-    const [dbUser] = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.workosUserId, authUser.id))
-      .limit(1);
-    if (dbUser) {
-      dbUserId = dbUser.id;
-      isOrganizer = dbUser.id === row?.event.organizerId;
-    }
-  }
+  const sessionUser = await getSession(args.request, args.context.cloudflare.env);
+  let dbUserId: string | null = sessionUser?.id ?? null;
+  let isOrganizer = dbUserId !== null && dbUserId === row?.event.organizerId;
 
   if (!row || (row.event.status === "draft" && !isOrganizer)) {
     throw new Response("Not Found", { status: 404 });
@@ -75,13 +64,16 @@ export async function loader(args: Route.LoaderArgs) {
     .orderBy(timeSlots.startsAt);
 
   // Committed participants (non-withdrawn), grouped by slot client-side
-  const participants = await db
+  // Signed-in users
+  const signedInParticipants = await db
     .select({
       slotId: commitments.timeSlotId,
       userId: users.id,
       name: users.fullName,
       avatarUrl: users.avatarUrl,
       reputationScore: users.reputationScore,
+      isGuest: sql<number>`0`,
+      guestEmail: sql<string | null>`null`,
     })
     .from(commitments)
     .innerJoin(users, eq(users.id, commitments.userId))
@@ -89,6 +81,44 @@ export async function loader(args: Route.LoaderArgs) {
       and(eq(commitments.eventId, params.id), isNull(commitments.withdrawnAt))
     )
     .orderBy(commitments.createdAt);
+
+  // Guest participants (userId is null)
+  const guestParticipants = await db
+    .select({
+      slotId: commitments.timeSlotId,
+      name: commitments.guestName,
+      guestEmail: commitments.guestEmail,
+    })
+    .from(commitments)
+    .where(
+      and(
+        eq(commitments.eventId, params.id),
+        isNull(commitments.withdrawnAt),
+        isNull(commitments.userId),
+      )
+    )
+    .orderBy(commitments.createdAt);
+
+  const participants = [
+    ...signedInParticipants.map((p) => ({
+      slotId: p.slotId,
+      userId: p.userId as string | null,
+      name: p.name,
+      avatarUrl: p.avatarUrl,
+      reputationScore: p.reputationScore,
+      isGuest: false,
+      guestEmail: null as string | null,
+    })),
+    ...guestParticipants.map((p) => ({
+      slotId: p.slotId,
+      userId: null as string | null,
+      name: p.name ?? "Guest",
+      avatarUrl: null as string | null,
+      reputationScore: null as number | null,
+      isGuest: true,
+      guestEmail: p.guestEmail,
+    })),
+  ];
 
   // Current user's active commitments with tier info
   const myCommitmentRows = dbUserId
@@ -137,7 +167,7 @@ export async function loader(args: Route.LoaderArgs) {
     slots,
     participants,
     isOrganizer,
-    isSignedIn: authUser !== null,
+    isSignedIn: sessionUser !== null,
     myCommittedSlotIds,
     myTierBySlotId,
     costTiers,
@@ -151,16 +181,9 @@ export async function action(args: Route.ActionArgs) {
   const { params, request, context } = args;
   const env = getEnv(context);
   const db = getDb(env);
-  const auth = await requireUser(args);
-  const workosId = auth.user.id;
 
-  // Resolve DB user
-  const [dbUser] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.workosUserId, workosId))
-    .limit(1);
-  if (!dbUser) throw new Response("User not found", { status: 404 });
+  // Session is optional — guests can commit without signing in
+  const sessionUser = await getSession(request, env);
 
   const form = await request.formData();
   const intent = form.get("intent") as string;
@@ -168,7 +191,16 @@ export async function action(args: Route.ActionArgs) {
   const tierLabel = (form.get("tierLabel") as string) || null;
   const tierAmountRaw = form.get("tierAmount") as string | null;
   const tierAmount = tierAmountRaw !== null && tierAmountRaw !== "" ? parseInt(tierAmountRaw, 10) : null;
+  // Guest fields
+  const guestName = (form.get("guestName") as string)?.trim() || null;
+  const guestEmail = (form.get("guestEmail") as string)?.trim() || null;
   if (!slotId) throw new Response("Missing slotId", { status: 400 });
+
+  // Must be either signed in or provide guest info
+  const dbUserId = sessionUser?.id ?? null;
+  if (!dbUserId && !guestName) {
+    throw new Response("Must be signed in or provide your name", { status: 400 });
+  }
 
   // Verify the slot belongs to this event
   const [slot] = await db
@@ -191,7 +223,7 @@ export async function action(args: Route.ActionArgs) {
     .limit(1);
   const eventData = rows[0];
   if (!eventData) throw new Response("Event not found", { status: 404 });
-  if (eventData.event.organizerId === dbUser.id) {
+  if (dbUserId && eventData.event.organizerId === dbUserId) {
     throw new Response("Organizers cannot commit to their own event", {
       status: 403,
     });
@@ -200,26 +232,31 @@ export async function action(args: Route.ActionArgs) {
   const baseUrl = new URL(request.url).origin;
 
   if (intent === "commit") {
-    // Check for an existing active commitment
-    const [existing] = await db
-      .select({ id: commitments.id })
-      .from(commitments)
-      .where(
-        and(
-          eq(commitments.userId, dbUser.id),
-          eq(commitments.timeSlotId, slotId),
-          isNull(commitments.withdrawnAt)
+    // Check for an existing active commitment (only for signed-in users)
+    if (dbUserId) {
+      const [existing] = await db
+        .select({ id: commitments.id })
+        .from(commitments)
+        .where(
+          and(
+            eq(commitments.userId, dbUserId),
+            eq(commitments.timeSlotId, slotId),
+            isNull(commitments.withdrawnAt)
+          )
         )
-      )
-      .limit(1);
+        .limit(1);
+      if (existing) return redirect(`/events/${params.id}`);
+    }
 
-    if (!existing) {
+    {
       await db.insert(commitments).values({
-        userId: dbUser.id,
+        userId: dbUserId,
         timeSlotId: slotId,
         eventId: params.id,
         tierLabel,
         tierAmount,
+        guestName: dbUserId ? null : guestName,
+        guestEmail: dbUserId ? null : guestEmail,
       });
 
       const newCount = slot.commitmentCount + 1;
@@ -297,6 +334,8 @@ export async function action(args: Route.ActionArgs) {
       }
     }
   } else if (intent === "withdraw") {
+    // Guests cannot withdraw — only signed-in users
+    if (!dbUserId) throw new Response("Must be signed in to withdraw", { status: 403 });
     // Only allow withdrawal if slot is not quorum_reached / confirmed
     if (slot.status === "quorum_reached" || slot.status === "confirmed") {
       throw new Response("Cannot withdraw after quorum is reached", {
@@ -309,7 +348,7 @@ export async function action(args: Route.ActionArgs) {
       .from(commitments)
       .where(
         and(
-          eq(commitments.userId, dbUser.id),
+          eq(commitments.userId, dbUserId!),
           eq(commitments.timeSlotId, slotId),
           isNull(commitments.withdrawnAt)
         )
@@ -404,14 +443,6 @@ function CommitButton({
 
   if (isOrganizer) return null;
 
-  if (!isSignedIn) {
-    return (
-      <a href="/auth/login" className="btn btn--primary btn--sm">
-        Sign in to commit
-      </a>
-    );
-  }
-
   const locked =
     slotStatus === "quorum_reached" || slotStatus === "confirmed";
 
@@ -479,13 +510,35 @@ function CommitButton({
             <input type="hidden" name="tierAmount" value={String(selectedTier.amount)} />
           </>
         )}
+        {!isSignedIn && (
+          <div className="guest-commit-fields">
+            <input
+              type="text"
+              name="guestName"
+              placeholder="Your full name *"
+              required
+              className="field__input field__input--sm"
+            />
+            <input
+              type="email"
+              name="guestEmail"
+              placeholder="Email (optional, only visible to host)"
+              className="field__input field__input--sm"
+            />
+          </div>
+        )}
         <button
           type="submit"
           className="btn btn--primary btn--sm"
           disabled={pending || !canSubmit}
         >
-          {pending ? "Committing…" : "Commit to this slot"}
+          {pending ? "Committing…" : isSignedIn ? "Commit to this slot" : "Commit as guest"}
         </button>
+        {!isSignedIn && (
+          <p className="slot-card__guest-note">
+            Or <a href="/auth/login">sign in</a> to track your commitments
+          </p>
+        )}
       </fetcher.Form>
     </div>
   );
@@ -694,20 +747,31 @@ export default function EventDetail() {
                                   {p.name[0]?.toUpperCase() ?? "?"}
                                 </span>
                               )}
-                              <a
-                                href={`/users/${p.userId}`}
-                                className="participant__name"
-                              >
-                                {p.name}
-                              </a>
+                              {p.userId ? (
+                                <a
+                                  href={`/users/${p.userId}`}
+                                  className="participant__name"
+                                >
+                                  {p.name}
+                                </a>
+                              ) : (
+                                <span className="participant__name">
+                                  {p.name}
+                                  <span className="participant__guest-badge">guest</span>
+                                </span>
+                              )}
                               {p.reputationScore !== null &&
-                                p.reputationScore !== undefined && (
+                                p.reputationScore !== undefined &&
+                                !p.isGuest && (
                                   <span className="participant__rep">
                                     {Math.round(
                                       Number(p.reputationScore)
                                     )}%
                                   </span>
                                 )}
+                              {p.isGuest && isOrganizer && p.guestEmail && (
+                                <span className="participant__email">{p.guestEmail}</span>
+                              )}
                             </li>
                           ))}
                         </ul>

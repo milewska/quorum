@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Form, Link, redirect, useActionData, useLoaderData, useNavigation } from "react-router";
 import { eq } from "drizzle-orm";
-import { requireUser } from "~/auth.server";
+import { requireSession } from "~/auth.server";
 import { getEnv } from "~/env.server";
 import { getDb } from "../../db";
 import { commitments, events, timeSlots, users } from "../../db/schema";
@@ -14,15 +14,11 @@ import type { SlotInput } from "~/components/SlotPicker";
 // ─── Server ───────────────────────────────────────────────────────────────────
 
 export async function loader(args: Route.LoaderArgs) {
-  const { user } = await requireUser(args);
+  const session = await requireSession(args.request, args.context.cloudflare.env);
   const { params, context } = args;
   const db = getDb(getEnv(context));
 
-  const [dbUser] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.workosUserId, user.id))
-    .limit(1);
+  const dbUser = { id: session.id };
 
   const [event] = await db
     .select()
@@ -46,17 +42,13 @@ export async function loader(args: Route.LoaderArgs) {
 type Errors = Record<string, string>;
 
 export async function action(args: Route.ActionArgs) {
-  const { user } = await requireUser(args);
+  const session = await requireSession(args.request, args.context.cloudflare.env);
   const { params, context } = args;
   const env = getEnv(context);
   const db = getDb(env);
 
   // Verify ownership
-  const [dbUser] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.workosUserId, user.id))
-    .limit(1);
+  const dbUser = { id: session.id };
 
   const [existing] = await db
     .select({ id: events.id, organizerId: events.organizerId, imageKey: events.imageKey, status: events.status })

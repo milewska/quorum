@@ -1786,8 +1786,8 @@ a {
 none;
 ist {
 );
-ing (manage page) ───�
-�;}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}  w}}}}}}}}}}}}}}}}}}}t:}}}}}}}}}}}}}}}}ra}}}}}}}}}}}}}}}}}}}}}}}x }}}}}}}}}}}}}}}}r-borde}}}}}}}}}}}}}}}}}}}}}}}}} color: var(--color-muted);
+ing (manage page) ───�
+�;}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}  w}}}}}}}}}}}}}}}}}}}t:}}}}}}}}}}}}}}}}ra}}}}}}}}}}}}}}}}}}}}}}}x }}}}}}}}}}}}}}}}r-borde}}}}}}}}}}}}}}}}}}}}}}}}} color: var(--color-muted);
   font-size: 0.875rem;
   di  di  di  di  di  di-i  di  dinter;
   just  just  just  just  just  jor  just  just  just  jink: 0;
@@ -1796,7 +1796,7 @@ ing (manage page) ───�
   line-heig  line-heig  line-heig  line-heig  line-heig  line-heig  line-heig  line-heig  line-heig  line-heig  line-heig  line-heig  line-heig  line-heig  line-heig  lin  font-size: 0.9375rem;
 }
 
-/* �/* �/* �/* �/* te/* �/* �/* �/* �/* te/* �/* �/* �/*──�/* �/* �/* �/* �/* te/* �─/* �/* �/* �/*�────────────────────────�/�──── */
+/* �/* �/* �/* �/* te/* �/* �/* �/* �/* te/* �/* �/* �/*──�/* �/* �/* �/* �/* te/* �─/* �/* �/* �/*�────────────────────────�/�──── */
 
 .manage.manage.manage.ma  d.manage flex;
 .manage.manction: column;
@@ -1809,7 +1809,7 @@ ing (manage page) ───�
   background: #15803d;
 }
 
-/* ─── User profile page ────────────/* ─── User profile page ────────────/* ─── User profile page ────────────/* ─── User profile page ───────── disp/* ─── User profile page ────────────/* ─── User profile page ────────────/* ─── User profile page ──────────�rde/* ─── User profile page ──�le/* ─── Us
+/* ─── User profile page ────────────/* ─── User profile page ────────────/* ─── User profile page ────────────/* ─── User profile page ───────── disp/* ─── User profile page ────────────/* ─── User profile page ────────────/* ─── User profile page ──────────�rde/* ─── User profile page ──�le/* ─── Us
 .user-profile__avatar--initials {
   display: flex;
   align-items: center;
@@ -1857,4 +1857,42 @@ ing (manage page) ───�
 .user-event-row__meta {
   font-size: 0.875rem;
   color: var(--color-muted);
+}
+
+/* ═══ Guest commitment ═══ */
+.guest-commit-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.field__input--sm {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+}
+.slot-card__guest-note {
+  font-size: 0.75rem;
+  color: var(--color-muted);
+  margin-top: 0.375rem;
+}
+.slot-card__guest-note a {
+  color: var(--color-accent);
+}
+.participant__guest-badge {
+  display: inline-block;
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-muted);
+  background: var(--color-border);
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  margin-left: 0.375rem;
+  vertical-align: middle;
+}
+.participant__email {
+  font-size: 0.75rem;
+  color: var(--color-muted);
+  margin-left: auto;
 }

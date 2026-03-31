@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { Form, Link, redirect, useActionData, useNavigation } from "react-router";
 import { eq } from "drizzle-orm";
-import { requireUser } from "~/auth.server";
+import { requireSession } from "~/auth.server";
 import { getEnv } from "~/env.server";
 import { getDb } from "../../db";
-import { events, timeSlots, users } from "../../db/schema";
+import { events, timeSlots } from "../../db/schema";
 import type { Route } from "./+types/events.new";
 import { SlotPicker } from "~/components/SlotPicker";
 import { CostTierEditor } from "~/components/CostTierEditor";
@@ -30,15 +30,15 @@ function parseLocalISO(s: string): Date {
 
 // ─── Server ───────────────────────────────────────────────────────────────────
 
-export async function loader(args: Route.LoaderArgs) {
-  await requireUser(args);
+export async function loader({ request, context }: Route.LoaderArgs) {
+  await requireSession(request, context.cloudflare.env);
   return null;
 }
 
 type Errors = Record<string, string>;
 
 export async function action(args: Route.ActionArgs) {
-  const { user } = await requireUser(args);
+  const session = await requireSession(args.request, args.context.cloudflare.env);
   const env = getEnv(args.context);
   const db = getDb(env);
 
@@ -160,20 +160,12 @@ export async function action(args: Route.ActionArgs) {
     });
   }
 
-  // ── DB user lookup ─────────────────────────────────────────────────────────
-  const [dbUser] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.workosUserId, user.id))
-    .limit(1);
-  if (!dbUser) throw new Response("User not found in database.", { status: 500 });
-
   // ── Insert event ──────────────────────────────────────────────────────────
   const status = intent === "publish" ? "active" : "draft";
   const [created] = await db
     .insert(events)
     .values({
-      organizerId: dbUser.id,
+      organizerId: session.id,
       title,
       description,
       location,

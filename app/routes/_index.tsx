@@ -1,6 +1,6 @@
 import { useRouteLoaderData } from "react-router";
 import type { MetaFunction } from "react-router";
-import type { loader as rootLoader } from "~/root";
+import type { loader as rootLoader } from "../root";
 
 export const meta: MetaFunction = () => [
   { title: "Quorum — Events that happen when enough people say yes" },

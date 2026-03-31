@@ -6,7 +6,7 @@ compatibility_date = "2025-03-16"
 compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = "./build/client"
 
-# D1 database (create with: wrangler d1 create quorum-db)
+# D1 database
 [[d1_databases]]
 binding = "DB"
 database_name = "quorum-db"
@@ -18,10 +18,12 @@ migrations_dir = "db/d1-migrations"
 binding = "IMAGES"
 bucket_name = "quorum-images"
 
+[vars]
+# Comma-separated Google email addresses allowed to sign in.
+# Leave empty to allow any authenticated Google user.
+ALLOWED_EMAILS = ""
+
 # Secrets (set via `wrangler pages secret put <KEY>` or the CF dashboard):
-#   WORKOS_API_KEY
-#   WORKOS_CLIENT_ID
-#   WORKOS_REDIRECT_URI
+#   GOOGLE_CLIENT_ID
+#   GOOGLE_CLIENT_SECRET
 #   RESEND_API_KEY
-#   SESSION_SECRET
-# Note: DATABASE_URL is no longer needed — D1 replaces Neon

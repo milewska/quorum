@@ -8,7 +8,7 @@ import {
   useNavigation,
 } from "react-router";
 import type { LinksFunction } from "react-router";
-import { rootAuthLoader } from "~/auth.server";
+import { getSession } from "~/auth.server";
 import appStylesHref from "./app.css?url";
 import type { Route } from "./+types/root";
 
@@ -16,8 +16,9 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: appStylesHref },
 ];
 
-export async function loader(args: Route.LoaderArgs) {
-  return rootAuthLoader(args);
+export async function loader({ request, context }: Route.LoaderArgs) {
+  const user = await getSession(request, context.cloudflare.env);
+  return { user };
 }
 
 /** Pure HTML shell — always renders, even during errors and hydration. */
@@ -40,8 +41,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
-  const auth = useLoaderData<typeof loader>();
-  const user = auth?.user ?? null;
+  const { user } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isNavigating = navigation.state !== "idle";
 
@@ -56,22 +56,20 @@ export default function App() {
             {user ? (
               <>
                 <a href="/dashboard" className="site-header__user">
-                  {user.profilePictureUrl ? (
+                  {user.avatarUrl ? (
                     <img
-                      src={user.profilePictureUrl}
-                      alt={[user.firstName, user.lastName]
-                        .filter(Boolean)
-                        .join(" ")}
+                      src={user.avatarUrl}
+                      alt={user.fullName}
                       className="site-header__avatar"
                       referrerPolicy="no-referrer"
                     />
                   ) : (
                     <span className="site-header__avatar site-header__avatar--initials">
-                      {(user.firstName?.[0] ?? user.email[0]).toUpperCase()}
+                      {user.fullName[0]?.toUpperCase() ?? "?"}
                     </span>
                   )}
                   <span className="site-header__name">
-                    {user.firstName ?? user.email}
+                    {user.fullName}
                   </span>
                 </a>
                 <form action="/auth/logout" method="post">

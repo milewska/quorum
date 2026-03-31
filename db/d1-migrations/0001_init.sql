@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS users (
   email           TEXT NOT NULL UNIQUE,
   avatar_url      TEXT,
   reputation_score REAL NOT NULL DEFAULT 100.0,
-  workos_user_id  TEXT NOT NULL UNIQUE,
+  google_id  TEXT NOT NULL UNIQUE,
   created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -40,13 +40,22 @@ CREATE TABLE IF NOT EXISTS time_slots (
 
 CREATE TABLE IF NOT EXISTS commitments (
   id            TEXT PRIMARY KEY,
-  user_id       TEXT NOT NULL REFERENCES users(id),
+  user_id       TEXT REFERENCES users(id),
   time_slot_id  TEXT NOT NULL REFERENCES time_slots(id) ON DELETE CASCADE,
   event_id      TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
   created_at    TEXT NOT NULL DEFAULT (datetime('now')),
   withdrawn_at  TEXT,
   tier_label    TEXT,
-  tier_amount   INTEGER
+  tier_amount   INTEGER,
+  guest_name    TEXT,
+  guest_email   TEXT
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL REFERENCES users(id),
+  expires_at  TEXT NOT NULL,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS attendance (
@@ -67,3 +76,5 @@ CREATE INDEX IF NOT EXISTS idx_commitments_user ON commitments(user_id);
 CREATE INDEX IF NOT EXISTS idx_commitments_slot ON commitments(time_slot_id);
 CREATE INDEX IF NOT EXISTS idx_attendance_event ON attendance(event_id);
 CREATE INDEX IF NOT EXISTS idx_attendance_user ON attendance(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);

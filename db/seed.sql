@@ -3,7 +3,7 @@
 
 -- ── Sample users ─────────────────────────────────────────────────────────────
 
-INSERT OR IGNORE INTO users (id, full_name, email, workos_user_id) VALUES
+INSERT OR IGNORE INTO users (id, full_name, email, google_id) VALUES
   ('seed-user-marcus', 'Marcus Bell', 'marcus.bell.seed@example.com', 'seed_user_jazz_org'),
   ('seed-user-priya',  'Priya Nair',  'priya.nair.seed@example.com',  'seed_user_yoga_org'),
   ('seed-user-sofia',  'Sofia Reyes', 'sofia.reyes.seed@example.com', 'seed_user_film_org'),

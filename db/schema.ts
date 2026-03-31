@@ -22,9 +22,8 @@ export const users = sqliteTable("users", {
   avatarUrl: text("avatar_url"),
   // Percentage (0–100). Calculated as: registered / committed-to-confirmed * 100
   reputationScore: real("reputation_score").notNull().default(100.0),
-  // WorkOS user ID for linking OAuth profiles (kept for future SSO)
-  // Also doubles as Google OAuth sub ID after QUOR-1 migration
-  workosUserId: text("workos_user_id").notNull().unique(),
+  // Google OAuth subject ID (unique per Google account)
+  googleId: text("google_id").notNull().unique(),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(datetime('now'))`),
@@ -84,14 +83,27 @@ export const timeSlots = sqliteTable("time_slots", {
   status: text("status").notNull().default("active"),
 });
 
+// ─── Sessions (Google OAuth) ──────────────────────────────────────────────────
+
+export const sessions = sqliteTable("sessions", {
+  id: text("id").primaryKey(), // session UUID stored in cookie
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id),
+  expiresAt: text("expires_at").notNull(), // ISO 8601
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+});
+
 // ─── Commitments ──────────────────────────────────────────────────────────────
 
 export const commitments = sqliteTable("commitments", {
   id: text("id")
     .primaryKey()
     .$defaultFn(() => crypto.randomUUID()),
+  // Nullable — null for guest commitments
   userId: text("user_id")
-    .notNull()
     .references(() => users.id),
   timeSlotId: text("time_slot_id")
     .notNull()
@@ -108,6 +120,9 @@ export const commitments = sqliteTable("commitments", {
   // Which pricing tier the committer chose (null for free events)
   tierLabel: text("tier_label"),
   tierAmount: integer("tier_amount"),
+  // Guest fields — used when userId is null (no login)
+  guestName: text("guest_name"),
+  guestEmail: text("guest_email"), // only visible to event organizer
 });
 
 // ─── Attendance ───────────────────────────────────────────────────────────────

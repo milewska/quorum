@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull, sql as drizzleSql } from "drizzle-orm";
 import { Form, redirect, useActionData, useFetcher, useLoaderData } from "react-router";
-import { requireUser } from "~/auth.server";
+import { requireSession } from "~/auth.server";
 import { getEnv } from "~/env.server";
 import { getDb } from "../../db";
 import { attendance, commitments, events, timeSlots, users } from "../../db/schema";
@@ -12,15 +12,8 @@ import type { Route } from "./+types/events.$id.manage";
 export async function loader(args: Route.LoaderArgs) {
   const { params, context } = args;
   const db = getDb(getEnv(context));
-  const auth = await requireUser(args);
-
-  // Resolve DB user
-  const [dbUser] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.workosUserId, auth.user.id))
-    .limit(1);
-  if (!dbUser) throw new Response("User not found", { status: 404 });
+  const session = await requireSession(args.request, args.context.cloudflare.env);
+  const dbUser = { id: session.id };
 
   // Load event
   const [row] = await db
@@ -87,15 +80,8 @@ export async function action(args: Route.ActionArgs) {
   const { params, request, context } = args;
   const env = getEnv(context);
   const db = getDb(env);
-  const auth = await requireUser(args);
-
-  // Resolve DB user
-  const [dbUser] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.workosUserId, auth.user.id))
-    .limit(1);
-  if (!dbUser) throw new Response("User not found", { status: 404 });
+  const session = await requireSession(request, env);
+  const dbUser = { id: session.id };
 
   // Load event — must belong to this organizer
   const [event] = await db
