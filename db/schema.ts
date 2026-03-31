@@ -56,6 +56,8 @@ export const events = sqliteTable("events", {
   costTiersJson: text("cost_tiers_json"),
   // When set, quorum is by total pledged $ instead of headcount. Null = headcount.
   priceQuorumCents: integer("price_quorum_cents"),
+  // IANA timezone for this event's time slots (e.g. 'Pacific/Honolulu', 'America/Los_Angeles')
+  timezone: text("timezone").notNull().default("Pacific/Honolulu"),
   // 'draft' | 'active' | 'quorum_reached' | 'confirmed' | 'completed' | 'expired'
   status: text("status").notNull().default("draft"),
   createdAt: text("created_at")

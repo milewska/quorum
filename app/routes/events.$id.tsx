@@ -7,6 +7,7 @@ import { getDb } from "../../db";
 import { commitments, events, timeSlots, users } from "../../db/schema";
 import type { Route } from "./+types/events.$id";
 import type { CostTier } from "~/components/CostTierEditor";
+import { formatInTimezone, formatTimeOnly, tzAbbreviation } from "~/components/TimezonePicker";
 import {
   sendMail,
   quorumReachedOrganizerEmail,
@@ -282,7 +283,7 @@ export async function action(args: Route.ActionArgs) {
 
         // Quorum emails (fire-and-forget)
         try {
-          const slotDate = new Date(slot.startsAt).toLocaleDateString("en-US", {
+          const slotDate = formatInTimezone(slot.startsAt, eventData.event.timezone ?? "Pacific/Honolulu", {
             weekday: "long", month: "long", day: "numeric", year: "numeric",
             hour: "numeric", minute: "2-digit",
           });
@@ -477,7 +478,7 @@ export default function EventDetail() {
           </p>
           <p className="event-detail__meta">
             Organised by {organizerName} &middot; Quorum: {event.threshold}{" "}
-            commitments
+            commitments &middot; {tzAbbreviation(event.timezone)}
           </p>
           {costTiers.length > 0 && (
             <div className="cost-tiers-summary">
@@ -628,9 +629,9 @@ export default function EventDetail() {
                           </div>
                           <div className="commit-slot__info">
                             <div className="commit-slot__time">
-                              {new Date(slot.startsAt).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                              {formatInTimezone(slot.startsAt, event.timezone)}
                               {" – "}
-                              {new Date(slot.endsAt).toLocaleString("en-US", { hour: "numeric", minute: "2-digit" })}
+                              {formatTimeOnly(slot.endsAt, event.timezone)}
                             </div>
                             {alreadyCommitted && <span className="commit-slot__badge commit-slot__badge--you">You're in</span>}
                             {locked && !alreadyCommitted && <span className="commit-slot__badge commit-slot__badge--quorum">Quorum reached</span>}
@@ -671,9 +672,9 @@ export default function EventDetail() {
                         </div>
                         <div className="commit-slot__info">
                           <div className="commit-slot__time">
-                            {new Date(slot.startsAt).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                            {formatInTimezone(slot.startsAt, event.timezone)}
                             {" – "}
-                            {new Date(slot.endsAt).toLocaleString("en-US", { hour: "numeric", minute: "2-digit" })}
+                            {formatTimeOnly(slot.endsAt, event.timezone)}
                           </div>
                           {alreadyCommitted && <span className="commit-slot__badge commit-slot__badge--you">You're in</span>}
                           {locked && <span className="commit-slot__badge commit-slot__badge--quorum">Quorum reached</span>}
@@ -703,7 +704,7 @@ export default function EventDetail() {
                       <div key={slot.id} className="commit-withdrawal-row">
                         <span className="commit-withdrawal-row__label">
                           ✓{" "}
-                          {new Date(slot.startsAt).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                          {formatInTimezone(slot.startsAt, event.timezone)}
                           {tier?.tierLabel ? ` — ${tier.tierLabel}` : ""}
                         </span>
                         {locked || deadlinePassed ? (
@@ -731,7 +732,7 @@ export default function EventDetail() {
                     return (
                       <div key={slot.id} className="commit-participants-slot">
                         <p className="commit-participants-slot__label">
-                          {new Date(slot.startsAt).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+                          {formatInTimezone(slot.startsAt, event.timezone, { weekday: "short", month: "short", day: "numeric" })}
                           {" — "}{slotParticipants.length} committed
                         </p>
                         <ul className="participant-list">

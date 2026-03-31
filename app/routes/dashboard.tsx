@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { useFetcher, useLoaderData } from "react-router";
 import { requireSession } from "~/auth.server";
+import { formatInTimezone, formatTimeOnly } from "~/components/TimezonePicker";
 import { getEnv } from "~/env.server";
 import { getDb } from "../../db";
 import { commitments, events, timeSlots, users } from "../../db/schema";
@@ -26,6 +27,7 @@ export async function loader(args: Route.LoaderArgs) {
       eventTitle: events.title,
       eventLocation: events.location,
       eventStatus: events.status,
+      eventTimezone: events.timezone,
       slotId: timeSlots.id,
       slotStatus: timeSlots.status,
       startsAt: timeSlots.startsAt,
@@ -108,14 +110,11 @@ const SLOT_STATUS_LABEL: Record<string, string> = {
   confirmed: "Confirmed",
 };
 
-function fmt(date: string | Date) {
-  return new Date(date).toLocaleString("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+function fmt(date: string | Date, tz?: string) {
+  return formatInTimezone(date, tz ?? "Pacific/Honolulu");
+}
+function fmtTimeOnly(date: string | Date, tz?: string) {
+  return formatTimeOnly(date, tz ?? "Pacific/Honolulu");
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -222,11 +221,8 @@ export default function Dashboard() {
                       {c.eventTitle}
                     </a>
                     <span className="dash-row__meta">
-                      {c.eventLocation} &middot; {fmt(c.startsAt)} &ndash;{" "}
-                      {new Date(c.endsAt).toLocaleString("en-US", {
-                        hour: "numeric",
-                        minute: "2-digit",
-                      })}
+                      {c.eventLocation} &middot; {fmt(c.startsAt, c.eventTimezone)} &ndash;{" "}
+                      {fmtTimeOnly(c.endsAt, c.eventTimezone)}
                     </span>
                   </div>
                   <div className="dash-row__secondary">

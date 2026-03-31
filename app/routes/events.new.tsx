@@ -10,6 +10,7 @@ import { SlotPicker } from "~/components/SlotPicker";
 import { CostTierEditor } from "~/components/CostTierEditor";
 import type { CostTier } from "~/components/CostTierEditor";
 import type { SlotInput } from "~/components/SlotPicker";
+import { TimezonePicker } from "~/components/TimezonePicker";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -54,6 +55,7 @@ export async function action(args: Route.ActionArgs) {
   const slotsStr = (fd.get("slots") as string) ?? "[]";
   const costTiersStr = (fd.get("costTiers") as string) ?? "[]";
   const priceQuorumStr = (fd.get("priceQuorumCents") as string) ?? "";
+  const timezone = ((fd.get("timezone") as string) ?? "Pacific/Honolulu").trim();
   const imageFile = fd.get("image") as File | null;
 
   let slots: SlotInput[] = [];
@@ -144,6 +146,7 @@ export async function action(args: Route.ActionArgs) {
         slots,
         costTiers,
         priceQuorumStr,
+        timezone,
       },
     };
   }
@@ -175,6 +178,7 @@ export async function action(args: Route.ActionArgs) {
       imageKey,
       costTiersJson: costTiers.length > 0 ? JSON.stringify(costTiers) : null,
       priceQuorumCents,
+      timezone,
       status: status as "active" | "draft",
     })
     .returning({ id: events.id });
@@ -207,6 +211,7 @@ export default function NewEvent() {
   const busy = navigation.state !== "idle";
 
   const [slots, setSlots] = useState<SlotInput[]>(vals?.slots ?? []);
+  const [timezone, setTimezone] = useState(vals?.timezone ?? "Pacific/Honolulu");
   const [costTiers, setCostTiers] = useState<CostTier[]>(vals?.costTiers ?? []);
   const [priceQuorumEnabled, setPriceQuorumEnabled] = useState(
     !!(vals?.priceQuorumStr)
@@ -223,6 +228,7 @@ export default function NewEvent() {
         <Form method="post" encType="multipart/form-data" className="event-form">
           <input type="hidden" name="slots" value={JSON.stringify(slots)} />
           <input type="hidden" name="costTiers" value={JSON.stringify(costTiers)} />
+          <input type="hidden" name="timezone" value={timezone} />
 
           {/* ── Details ── */}
           <fieldset className="form-section">
@@ -318,6 +324,17 @@ export default function NewEvent() {
                 {errors.deadline && (
                   <p className="field__error">{errors.deadline}</p>
                 )}
+              </div>
+
+              <div className="field">
+                <label className="field__label" htmlFor="timezone">
+                  Timezone
+                </label>
+                <TimezonePicker
+                  name="tz-display"
+                  value={timezone}
+                  onChange={setTimezone}
+                />
               </div>
             </div>
 

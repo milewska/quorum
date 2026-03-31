@@ -10,6 +10,7 @@ import { SlotPicker } from "~/components/SlotPicker";
 import { CostTierEditor } from "~/components/CostTierEditor";
 import type { CostTier } from "~/components/CostTierEditor";
 import type { SlotInput } from "~/components/SlotPicker";
+import { TimezonePicker } from "~/components/TimezonePicker";
 
 // ─── Server ───────────────────────────────────────────────────────────────────
 
@@ -81,6 +82,7 @@ export async function action(args: Route.ActionArgs) {
   const slotsStr = (fd.get("slots") as string) ?? "[]";
   const costTiersStr = (fd.get("costTiers") as string) ?? "[]";
   const priceQuorumStr = (fd.get("priceQuorumCents") as string) ?? "";
+  const timezone = ((fd.get("timezone") as string) ?? "Pacific/Honolulu").trim();
   const imageFile = fd.get("image") as File | null;
 
   let slots: SlotInput[] = [];
@@ -146,7 +148,7 @@ export async function action(args: Route.ActionArgs) {
   if (Object.keys(errors).length > 0) {
     return {
       errors,
-      values: { title, description, location, visibility, thresholdStr, deadlineStr, slots, costTiers, priceQuorumStr },
+      values: { title, description, location, visibility, thresholdStr, deadlineStr, slots, costTiers, priceQuorumStr, timezone },
     };
   }
 
@@ -178,6 +180,7 @@ export async function action(args: Route.ActionArgs) {
       imageKey,
       costTiersJson: costTiers.length > 0 ? JSON.stringify(costTiers) : null,
       priceQuorumCents,
+      timezone,
       status: newStatus,
       updatedAt: new Date().toISOString(),
     })
@@ -225,6 +228,10 @@ export default function EditEvent() {
     initialSlots.length > 0 ? initialSlots : []
   );
 
+  const [timezone, setTimezone] = useState(
+    vals?.timezone ?? event.timezone ?? "Pacific/Honolulu"
+  );
+
   const initialTiers: CostTier[] =
     vals?.costTiers ??
     (event.costTiersJson ? (JSON.parse(event.costTiersJson) as CostTier[]) : []);
@@ -254,6 +261,7 @@ export default function EditEvent() {
         <Form method="post" encType="multipart/form-data" className="event-form">
           <input type="hidden" name="slots" value={JSON.stringify(slots)} />
           <input type="hidden" name="costTiers" value={JSON.stringify(costTiers)} />
+          <input type="hidden" name="timezone" value={timezone} />
 
           {/* ── Details ── */}
           <fieldset className="form-section">
@@ -344,6 +352,17 @@ export default function EditEvent() {
                 {errors.deadline && (
                   <p className="field__error">{errors.deadline}</p>
                 )}
+              </div>
+
+              <div className="field">
+                <label className="field__label" htmlFor="timezone">
+                  Timezone
+                </label>
+                <TimezonePicker
+                  name="tz-display"
+                  value={timezone}
+                  onChange={setTimezone}
+                />
               </div>
             </div>
 

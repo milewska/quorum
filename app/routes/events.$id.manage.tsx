@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { Form, redirect, useActionData, useFetcher, useLoaderData } from "react-router";
 import { requireSession } from "~/auth.server";
+import { formatInTimezone, formatTimeOnly } from "~/components/TimezonePicker";
 import { getEnv } from "~/env.server";
 import { getDb } from "../../db";
 import { attendance, commitments, events, timeSlots, users } from "../../db/schema";
@@ -131,7 +132,7 @@ export async function action(args: Route.ActionArgs) {
       .where(eq(events.id, params.id));
 
     // Email all committed participants on this slot
-    const slotDate = new Date(slot.startsAt).toLocaleDateString("en-US", {
+    const slotDate = formatInTimezone(slot.startsAt, event.timezone ?? "Pacific/Honolulu", {
       weekday: "long",
       month: "long",
       day: "numeric",
@@ -271,14 +272,8 @@ const SLOT_STATUS_LABEL: Record<string, string> = {
   confirmed: "Confirmed",
 };
 
-function fmt(date: string | Date) {
-  return new Date(date).toLocaleString("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+function fmt(date: string | Date, tz?: string) {
+  return formatInTimezone(date, tz ?? "Pacific/Honolulu");
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -355,13 +350,10 @@ export default function ManageEvent() {
                 return (
                   <li key={slot.id} className="manage-slot-card manage-slot-card--quorum">
                     <div className="manage-slot-card__time">
-                      <strong>{fmt(slot.startsAt)}</strong>
+                      <strong>{fmt(slot.startsAt, event.timezone)}</strong>
                       <span className="manage-slot-card__dash">&ndash;</span>
                       <span>
-                        {new Date(slot.endsAt).toLocaleString("en-US", {
-                          hour: "numeric",
-                          minute: "2-digit",
-                        })}
+                        {formatTimeOnly(slot.endsAt, event.timezone)}
                       </span>
                       <span className="badge badge--quorum_reached">
                         {slot.commitmentCount} committed
@@ -426,13 +418,10 @@ export default function ManageEvent() {
                     className="manage-slot-card manage-slot-card--confirmed"
                   >
                     <div className="manage-slot-card__time">
-                      <strong>{fmt(slot.startsAt)}</strong>
+                      <strong>{fmt(slot.startsAt, event.timezone)}</strong>
                       <span className="manage-slot-card__dash">&ndash;</span>
                       <span>
-                        {new Date(slot.endsAt).toLocaleString("en-US", {
-                          hour: "numeric",
-                          minute: "2-digit",
-                        })}
+                        {formatTimeOnly(slot.endsAt, event.timezone)}
                       </span>
                       <span className="badge badge--confirmed">
                         {slot.commitmentCount} committed
@@ -542,13 +531,10 @@ export default function ManageEvent() {
                 return (
                   <li key={slot.id} className="manage-slot-card">
                     <div className="manage-slot-card__time">
-                      <strong>{fmt(slot.startsAt)}</strong>
+                      <strong>{fmt(slot.startsAt, event.timezone)}</strong>
                       <span className="manage-slot-card__dash">&ndash;</span>
                       <span>
-                        {new Date(slot.endsAt).toLocaleString("en-US", {
-                          hour: "numeric",
-                          minute: "2-digit",
-                        })}
+                        {formatTimeOnly(slot.endsAt, event.timezone)}
                       </span>
                       <span className="badge badge--active">
                         {slot.commitmentCount} / {event.threshold} committed

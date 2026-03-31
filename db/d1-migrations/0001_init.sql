@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS events (
   registration_url  TEXT,
   cost_tiers_json   TEXT,
   price_quorum_cents INTEGER,
+  timezone          TEXT NOT NULL DEFAULT 'Pacific/Honolulu',
   status            TEXT NOT NULL DEFAULT 'draft',
   created_at        TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
