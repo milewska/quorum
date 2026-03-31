@@ -182,36 +182,14 @@ export async function action(args: Route.ActionArgs) {
   const env = getEnv(context);
   const db = getDb(env);
 
-  // Session is optional — guests can commit without signing in
   const sessionUser = await getSession(request, env);
+  const dbUserId = sessionUser?.id ?? null;
 
   const form = await request.formData();
   const intent = form.get("intent") as string;
-  const slotId = form.get("slotId") as string;
-  const tierLabel = (form.get("tierLabel") as string) || null;
-  const tierAmountRaw = form.get("tierAmount") as string | null;
-  const tierAmount = tierAmountRaw !== null && tierAmountRaw !== "" ? parseInt(tierAmountRaw, 10) : null;
-  // Guest fields
-  const guestName = (form.get("guestName") as string)?.trim() || null;
-  const guestEmail = (form.get("guestEmail") as string)?.trim() || null;
-  if (!slotId) throw new Response("Missing slotId", { status: 400 });
 
-  // Must be either signed in or provide guest info
-  const dbUserId = sessionUser?.id ?? null;
-  if (!dbUserId && !guestName) {
-    throw new Response("Must be signed in or provide your name", { status: 400 });
-  }
-
-  // Verify the slot belongs to this event
-  const [slot] = await db
-    .select()
-    .from(timeSlots)
-    .where(and(eq(timeSlots.id, slotId), eq(timeSlots.eventId, params.id)))
-    .limit(1);
-  if (!slot) throw new Response("Slot not found", { status: 404 });
-
-  // Load event with organizer email
-  const rows = await db
+  // Load event with organizer email (needed for all intents)
+  const eventRows = await db
     .select({
       event: events,
       organizerEmail: users.email,
@@ -221,34 +199,55 @@ export async function action(args: Route.ActionArgs) {
     .innerJoin(users, eq(users.id, events.organizerId))
     .where(eq(events.id, params.id))
     .limit(1);
-  const eventData = rows[0];
+  const eventData = eventRows[0];
   if (!eventData) throw new Response("Event not found", { status: 404 });
-  if (dbUserId && eventData.event.organizerId === dbUserId) {
-    throw new Response("Organizers cannot commit to their own event", {
-      status: 403,
-    });
-  }
 
   const baseUrl = new URL(request.url).origin;
 
-  if (intent === "commit") {
-    // Check for an existing active commitment (only for signed-in users)
-    if (dbUserId) {
-      const [existing] = await db
-        .select({ id: commitments.id })
-        .from(commitments)
-        .where(
-          and(
-            eq(commitments.userId, dbUserId),
-            eq(commitments.timeSlotId, slotId),
-            isNull(commitments.withdrawnAt)
-          )
-        )
-        .limit(1);
-      if (existing) return redirect(`/events/${params.id}`);
+  // ── Batch commit (new Doodle-style flow) ──────────────────────────────────
+  if (intent === "batch_commit") {
+    const slotIds = ((form.get("slotIds") as string) ?? "").split(",").filter(Boolean);
+    const guestName = (form.get("guestName") as string)?.trim() || null;
+    const guestEmail = (form.get("guestEmail") as string)?.trim() || null;
+    const tierLabel = (form.get("tierLabel") as string) || null;
+    const tierAmountRaw = form.get("tierAmount") as string | null;
+    const tierAmount = tierAmountRaw ? parseInt(tierAmountRaw, 10) : null;
+
+    if (slotIds.length === 0) return redirect(`/events/${params.id}`);
+    if (!dbUserId && !guestName) {
+      throw new Response("Please enter your name", { status: 400 });
+    }
+    if (dbUserId && eventData.event.organizerId === dbUserId) {
+      throw new Response("Organizers cannot commit to their own event", { status: 403 });
     }
 
-    {
+    // Load all target slots
+    const allSlots = await db
+      .select()
+      .from(timeSlots)
+      .where(eq(timeSlots.eventId, params.id));
+    const slotMap = new Map(allSlots.map((s) => [s.id, s]));
+
+    for (const slotId of slotIds) {
+      const slot = slotMap.get(slotId);
+      if (!slot) continue;
+
+      // Skip if signed-in user already committed to this slot
+      if (dbUserId) {
+        const [existing] = await db
+          .select({ id: commitments.id })
+          .from(commitments)
+          .where(
+            and(
+              eq(commitments.userId, dbUserId),
+              eq(commitments.timeSlotId, slotId),
+              isNull(commitments.withdrawnAt)
+            )
+          )
+          .limit(1);
+        if (existing) continue;
+      }
+
       await db.insert(commitments).values({
         userId: dbUserId,
         timeSlotId: slotId,
@@ -265,95 +264,79 @@ export async function action(args: Route.ActionArgs) {
         .set({ commitmentCount: newCount })
         .where(eq(timeSlots.id, slotId));
 
-      // ── Quorum detection ───────────────────────────────────────────────────
-      const threshold = eventData.event.threshold;
-      const slotJustReachedQuorum =
-        slot.status === "active" && newCount >= threshold;
-
-      if (slotJustReachedQuorum) {
-        // Update slot status
+      // Quorum detection
+      if (slot.status === "active" && newCount >= eventData.event.threshold) {
         await db
           .update(timeSlots)
           .set({ status: "quorum_reached" })
           .where(eq(timeSlots.id, slotId));
 
-        // Update event status if not already elevated
-        if (
-          eventData.event.status === "active" ||
-          eventData.event.status === "draft"
-        ) {
+        if (eventData.event.status === "active" || eventData.event.status === "draft") {
           await db
             .update(events)
             .set({ status: "quorum_reached", updatedAt: new Date().toISOString() })
             .where(eq(events.id, params.id));
         }
 
-        // Send emails (fire-and-forget on error so commitment still saves)
-        const slotDate = new Date(slot.startsAt).toLocaleDateString("en-US", {
-          weekday: "long",
-          month: "long",
-          day: "numeric",
-          year: "numeric",
-          hour: "numeric",
-          minute: "2-digit",
-        });
-
+        // Quorum emails (fire-and-forget)
         try {
-          // Email organizer
-          const orgEmail = quorumReachedOrganizerEmail(
-            eventData.event.title,
-            params.id,
-            slotDate,
-            baseUrl
-          );
-          await sendMail(env, { to: eventData.organizerEmail, ...orgEmail });
-
-          // Email all committed participants on this slot
-          const participantRows = await db
+          const slotDate = new Date(slot.startsAt).toLocaleDateString("en-US", {
+            weekday: "long", month: "long", day: "numeric", year: "numeric",
+            hour: "numeric", minute: "2-digit",
+          });
+          await sendMail(env, {
+            to: eventData.organizerEmail,
+            ...quorumReachedOrganizerEmail(eventData.event.title, params.id, slotDate, baseUrl),
+          });
+          const pRows = await db
             .select({ email: users.email })
             .from(commitments)
             .innerJoin(users, eq(users.id, commitments.userId))
-            .where(
-              and(
-                eq(commitments.timeSlotId, slotId),
-                isNull(commitments.withdrawnAt)
-              )
-            );
-          for (const p of participantRows) {
-            const pEmail = quorumReachedParticipantEmail(
-              eventData.event.title,
-              params.id,
-              slotDate,
-              baseUrl
-            );
-            await sendMail(env, { to: p.email, ...pEmail });
+            .where(and(eq(commitments.timeSlotId, slotId), isNull(commitments.withdrawnAt)));
+          for (const p of pRows) {
+            await sendMail(env, {
+              to: p.email,
+              ...quorumReachedParticipantEmail(eventData.event.title, params.id, slotDate, baseUrl),
+            });
           }
         } catch (e) {
-          console.error("Email send failed after quorum reached:", e);
+          console.error("Quorum email failed:", e);
         }
       }
     }
-  } else if (intent === "withdraw") {
-    // Guests cannot withdraw — only signed-in users
+
+    return redirect(`/events/${params.id}`);
+  }
+
+  // ── Single-slot withdraw (signed-in users only) ───────────────────────────
+  if (intent === "withdraw") {
+    const slotId = form.get("slotId") as string;
+    if (!slotId) throw new Response("Missing slotId", { status: 400 });
     if (!dbUserId) throw new Response("Must be signed in to withdraw", { status: 403 });
-    // Only allow withdrawal if slot is not quorum_reached / confirmed
+
+    const [slot] = await db
+      .select()
+      .from(timeSlots)
+      .where(and(eq(timeSlots.id, slotId), eq(timeSlots.eventId, params.id)))
+      .limit(1);
+    if (!slot) throw new Response("Slot not found", { status: 404 });
+
     if (slot.status === "quorum_reached" || slot.status === "confirmed") {
-      throw new Response("Cannot withdraw after quorum is reached", {
-        status: 403,
-      });
+      throw new Response("Cannot withdraw after quorum is reached", { status: 403 });
     }
-    // Find active commitment
+
     const [existing] = await db
       .select({ id: commitments.id })
       .from(commitments)
       .where(
         and(
-          eq(commitments.userId, dbUserId!),
+          eq(commitments.userId, dbUserId),
           eq(commitments.timeSlotId, slotId),
           isNull(commitments.withdrawnAt)
         )
       )
       .limit(1);
+
     if (existing) {
       await db
         .update(commitments)
@@ -366,26 +349,14 @@ export async function action(args: Route.ActionArgs) {
         .set({ commitmentCount: newCount })
         .where(eq(timeSlots.id, slotId));
 
-      // Revert slot to active if count drops below threshold
-      const slotStatusNow = slot.status as string;
-      if (slotStatusNow === "quorum_reached" && newCount < eventData.event.threshold) {
-        await db
-          .update(timeSlots)
-          .set({ status: "active" })
-          .where(eq(timeSlots.id, slotId));
-
-        // Check if any other slot on this event still has quorum
-        const stillQuorumSlots = await db
+      if ((slot.status as string) === "quorum_reached" && newCount < eventData.event.threshold) {
+        await db.update(timeSlots).set({ status: "active" }).where(eq(timeSlots.id, slotId));
+        const stillQuorum = await db
           .select({ id: timeSlots.id })
           .from(timeSlots)
-          .where(
-            and(
-              eq(timeSlots.eventId, params.id),
-              eq(timeSlots.status, "quorum_reached")
-            )
-          )
+          .where(and(eq(timeSlots.eventId, params.id), eq(timeSlots.status, "quorum_reached")))
           .limit(1);
-        if (stillQuorumSlots.length === 0 && eventData.event.status === "quorum_reached") {
+        if (stillQuorum.length === 0 && eventData.event.status === "quorum_reached") {
           await db
             .update(events)
             .set({ status: "active", updatedAt: new Date().toISOString() })
@@ -414,136 +385,6 @@ function formatCents(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
 }
 
-// ─── Commit / Withdraw button ─────────────────────────────────────────────────
-
-function CommitButton({
-  slotId,
-  slotStatus,
-  committed,
-  isSignedIn,
-  isOrganizer,
-  deadlinePassed,
-  costTiers,
-  myTier,
-}: {
-  slotId: string;
-  slotStatus: string;
-  committed: boolean;
-  isSignedIn: boolean;
-  isOrganizer: boolean;
-  deadlinePassed: boolean;
-  costTiers: CostTier[];
-  myTier: { tierLabel: string | null; tierAmount: number | null } | null;
-}) {
-  const fetcher = useFetcher();
-  const pending = fetcher.state !== "idle";
-  const [selectedTierLabel, setSelectedTierLabel] = useState<string | null>(
-    costTiers.length === 0 ? "__free__" : null
-  );
-
-  if (isOrganizer) return null;
-
-  const locked =
-    slotStatus === "quorum_reached" || slotStatus === "confirmed";
-
-  if (committed) {
-    const tier = myTier;
-    return (
-      <div className="slot-card__commit-row">
-        <span className="slot-card__committed-badge">
-          ✓ Committed
-          {tier?.tierLabel ? ` — ${tier.tierLabel}` : ""}
-          {tier?.tierAmount != null && tier.tierAmount > 0 ? ` (${formatCents(tier.tierAmount)})` : ""}
-        </span>
-        {locked || deadlinePassed ? (
-          <span className="slot-card__locked-note">
-            {locked ? "Withdrawal locked — quorum reached" : "Deadline passed"}
-          </span>
-        ) : (
-          <fetcher.Form method="post">
-            <input type="hidden" name="intent" value="withdraw" />
-            <input type="hidden" name="slotId" value={slotId} />
-            <button
-              type="submit"
-              className="btn btn--ghost btn--sm"
-              disabled={pending}
-            >
-              {pending ? "Withdrawing…" : "Withdraw"}
-            </button>
-          </fetcher.Form>
-        )}
-      </div>
-    );
-  }
-
-  if (deadlinePassed || locked) return null;
-
-  const selectedTier = costTiers.find((t) => t.label === selectedTierLabel);
-  const canSubmit = selectedTierLabel !== null;
-
-  return (
-    <div className="slot-card__commit-block">
-      {costTiers.length > 0 && (
-        <div className="tier-selector">
-          <p className="tier-selector__label">Select your tier:</p>
-          {costTiers.map((t) => (
-            <label key={t.label} className="tier-option">
-              <input
-                type="radio"
-                name={`tier-${slotId}`}
-                value={t.label}
-                checked={selectedTierLabel === t.label}
-                onChange={() => setSelectedTierLabel(t.label)}
-              />
-              <span className="tier-option__name">{t.label}</span>
-              <span className="tier-option__price">{formatCents(t.amount)}</span>
-            </label>
-          ))}
-        </div>
-      )}
-      <fetcher.Form method="post">
-        <input type="hidden" name="intent" value="commit" />
-        <input type="hidden" name="slotId" value={slotId} />
-        {selectedTier && (
-          <>
-            <input type="hidden" name="tierLabel" value={selectedTier.label} />
-            <input type="hidden" name="tierAmount" value={String(selectedTier.amount)} />
-          </>
-        )}
-        {!isSignedIn && (
-          <div className="guest-commit-fields">
-            <input
-              type="text"
-              name="guestName"
-              placeholder="Your full name *"
-              required
-              className="field__input field__input--sm"
-            />
-            <input
-              type="email"
-              name="guestEmail"
-              placeholder="Email (optional, only visible to host)"
-              className="field__input field__input--sm"
-            />
-          </div>
-        )}
-        <button
-          type="submit"
-          className="btn btn--primary btn--sm"
-          disabled={pending || !canSubmit}
-        >
-          {pending ? "Committing…" : isSignedIn ? "Commit to this slot" : "Commit as guest"}
-        </button>
-        {!isSignedIn && (
-          <p className="slot-card__guest-note">
-            Or <a href="/auth/login">sign in</a> to track your commitments
-          </p>
-        )}
-      </fetcher.Form>
-    </div>
-  );
-}
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function EventDetail() {
@@ -560,9 +401,27 @@ export default function EventDetail() {
     pledgedBySlotId,
   } = useLoaderData<typeof loader>();
 
+  const fetcher = useFetcher();
+  const pending = fetcher.state !== "idle";
+
   const deadlineDate = new Date(event.deadline);
   const countdown = deadlineCountdown(deadlineDate);
   const deadlinePassed = deadlineDate.getTime() <= Date.now();
+
+  // Batch commit: track which slots are checked
+  const [checkedSlots, setCheckedSlots] = useState<Set<string>>(new Set());
+  const [selectedTierLabel, setSelectedTierLabel] = useState<string | null>(
+    costTiers.length === 0 ? "__free__" : null
+  );
+
+  function toggleSlot(id: string) {
+    setCheckedSlots((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   // Group participants by slot id
   const bySlot = participants.reduce<Record<string, typeof participants>>(
@@ -572,6 +431,19 @@ export default function EventDetail() {
     },
     {}
   );
+
+  // Can this user commit? (not organizer, not past deadline)
+  const canCommit = !isOrganizer && !deadlinePassed &&
+    (event.status === "active" || event.status === "quorum_reached");
+
+  // Committable slots: not already committed by this user, still active
+  const committableSlotIds = slots
+    .filter((s) => !myCommittedSlotIds.includes(s.id) && s.status === "active")
+    .map((s) => s.id);
+
+  const selectedTier = costTiers.find((t) => t.label === selectedTierLabel);
+  const hasSelection = checkedSlots.size > 0;
+  const canSubmit = hasSelection && (costTiers.length === 0 || selectedTierLabel !== null);
 
   return (
     <section className="page-section">
@@ -663,124 +535,241 @@ export default function EventDetail() {
           ))}
         </div>
 
-        {/* Time slots */}
+        {/* ═══ Commitment Section (Doodle-style) ═══ */}
         <div className="event-detail__slots">
-          <h2>Time Slots</h2>
-          {slots.length === 0 ? (
-            <p className="event-detail__no-slots">No time slots added yet.</p>
-          ) : (
-            <ul className="slot-list">
-              {slots.map((slot) => {
-                const isPriceQuorum = event.priceQuorumCents != null;
-                const pledgedCents = pledgedBySlotId[slot.id] ?? 0;
-                const pct = isPriceQuorum
-                  ? Math.min(100, (pledgedCents / event.priceQuorumCents!) * 100)
-                  : Math.min(100, (slot.commitmentCount / event.threshold) * 100);
-                const progressLabel = isPriceQuorum
-                  ? `$${(pledgedCents / 100).toFixed(0)} of $${(event.priceQuorumCents! / 100).toFixed(0)} pledged`
-                  : `${slot.commitmentCount} / ${event.threshold} committed`;
-                const slotParticipants = bySlot[slot.id] ?? [];
-                const committed = myCommittedSlotIds.includes(slot.id);
-                return (
-                  <li key={slot.id} className="slot-card">
-                    <div className="slot-card__time">
-                      <span>
-                        {new Date(slot.startsAt).toLocaleString("en-US", {
-                          weekday: "short",
-                          month: "short",
-                          day: "numeric",
-                          hour: "numeric",
-                          minute: "2-digit",
-                        })}
-                      </span>
-                      <span className="slot-card__dash">&ndash;</span>
-                      <span>
-                        {new Date(slot.endsAt).toLocaleString("en-US", {
-                          hour: "numeric",
-                          minute: "2-digit",
-                        })}
-                      </span>
-                      {slot.status !== "active" && (
-                        <span className={`badge badge--${slot.status}`}>
-                          {STATUS_LABEL[slot.status] ?? slot.status}
-                        </span>
-                      )}
-                    </div>
+          <h2>When are you available?</h2>
 
-                    <div className="slot-card__progress">
-                      <div className="slot-card__bar">
-                        <div
-                          className="slot-card__fill"
-                          style={{ width: `${pct}%` }}
+          {canCommit && committableSlotIds.length > 0 && (
+            <fetcher.Form method="post" className="commit-form">
+              <input type="hidden" name="intent" value="batch_commit" />
+              <input type="hidden" name="slotIds" value={Array.from(checkedSlots).join(",")} />
+              {selectedTier && (
+                <>
+                  <input type="hidden" name="tierLabel" value={selectedTier.label} />
+                  <input type="hidden" name="tierAmount" value={String(selectedTier.amount)} />
+                </>
+              )}
+
+              {/* Identity bar */}
+              <div className="commit-identity">
+                {isSignedIn ? (
+                  <div className="commit-identity__signed-in">
+                    <span className="commit-identity__check">✓</span>
+                    <span>Committing as <strong>{participants.find((p) => !p.isGuest)?.name ?? "you"}</strong></span>
+                  </div>
+                ) : (
+                  <div className="commit-identity__guest">
+                    <div className="commit-identity__fields">
+                      <input
+                        type="text"
+                        name="guestName"
+                        placeholder="Your name *"
+                        required
+                        className="field__input commit-identity__input"
+                      />
+                      <input
+                        type="email"
+                        name="guestEmail"
+                        placeholder="Email (only visible to host)"
+                        className="field__input commit-identity__input"
+                      />
+                    </div>
+                    <a href="/auth/login" className="btn btn--ghost btn--sm commit-identity__signin">
+                      Sign in with Google
+                    </a>
+                  </div>
+                )}
+              </div>
+
+              {/* Tier selector (if paid event) */}
+              {costTiers.length > 0 && (
+                <div className="commit-tiers">
+                  <p className="commit-tiers__label">Select your tier:</p>
+                  <div className="commit-tiers__options">
+                    {costTiers.map((t) => (
+                      <label key={t.label} className={`commit-tier-chip${selectedTierLabel === t.label ? " commit-tier-chip--selected" : ""}`}>
+                        <input
+                          type="radio"
+                          name="tierSelect"
+                          value={t.label}
+                          checked={selectedTierLabel === t.label}
+                          onChange={() => setSelectedTierLabel(t.label)}
+                          className="sr-only"
                         />
+                        <span className="commit-tier-chip__label">{t.label}</span>
+                        <span className="commit-tier-chip__price">{formatCents(t.amount)}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Instruction */}
+              <p className="commit-form__hint">
+                Select all dates you're available for — you'll be notified when quorum is reached.
+              </p>
+
+              {/* Slot checkboxes */}
+              <div className="commit-slots">
+                {slots.map((slot) => {
+                  const alreadyCommitted = myCommittedSlotIds.includes(slot.id);
+                  const locked = slot.status === "quorum_reached" || slot.status === "confirmed";
+                  const canCheck = !alreadyCommitted && slot.status === "active";
+                  const isChecked = checkedSlots.has(slot.id);
+                  const isPriceQuorum = event.priceQuorumCents != null;
+                  const pledgedCents = pledgedBySlotId[slot.id] ?? 0;
+                  const pct = isPriceQuorum
+                    ? Math.min(100, (pledgedCents / event.priceQuorumCents!) * 100)
+                    : Math.min(100, (slot.commitmentCount / event.threshold) * 100);
+                  const progressLabel = isPriceQuorum
+                    ? `$${(pledgedCents / 100).toFixed(0)} / $${(event.priceQuorumCents! / 100).toFixed(0)}`
+                    : `${slot.commitmentCount} / ${event.threshold}`;
+
+                  return (
+                    <label
+                      key={slot.id}
+                      className={`commit-slot${isChecked ? " commit-slot--checked" : ""}${alreadyCommitted ? " commit-slot--committed" : ""}${locked ? " commit-slot--locked" : ""}`}
+                    >
+                      <div className="commit-slot__check">
+                        {alreadyCommitted ? (
+                          <span className="commit-slot__done">✓</span>
+                        ) : canCheck ? (
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => toggleSlot(slot.id)}
+                            className="commit-slot__checkbox"
+                          />
+                        ) : (
+                          <span className="commit-slot__lock">—</span>
+                        )}
                       </div>
-                      <span className="slot-card__count">
-                        {progressLabel}
+                      <div className="commit-slot__info">
+                        <div className="commit-slot__time">
+                          {new Date(slot.startsAt).toLocaleString("en-US", {
+                            weekday: "short", month: "short", day: "numeric",
+                            hour: "numeric", minute: "2-digit",
+                          })}
+                          {" – "}
+                          {new Date(slot.endsAt).toLocaleString("en-US", {
+                            hour: "numeric", minute: "2-digit",
+                          })}
+                        </div>
+                        {alreadyCommitted && (
+                          <span className="commit-slot__badge commit-slot__badge--you">You're in</span>
+                        )}
+                        {locked && !alreadyCommitted && (
+                          <span className="commit-slot__badge commit-slot__badge--quorum">Quorum reached</span>
+                        )}
+                      </div>
+                      <div className="commit-slot__progress">
+                        <div className="slot-card__bar">
+                          <div className="slot-card__fill" style={{ width: `${pct}%` }} />
+                        </div>
+                        <span className="commit-slot__count">{progressLabel}</span>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+
+              {/* Submit */}
+              <button
+                type="submit"
+                className="btn btn--primary commit-form__submit"
+                disabled={pending || !canSubmit}
+              >
+                {pending
+                  ? "Committing…"
+                  : `Commit to ${checkedSlots.size} slot${checkedSlots.size !== 1 ? "s" : ""}`}
+              </button>
+            </fetcher.Form>
+          )}
+
+          {/* Already committed — show withdraw options */}
+          {myCommittedSlotIds.length > 0 && (
+            <div className="commit-withdrawals">
+              {slots.filter((s) => myCommittedSlotIds.includes(s.id)).map((slot) => {
+                const locked = slot.status === "quorum_reached" || slot.status === "confirmed";
+                const tier = myTierBySlotId[slot.id];
+                return (
+                  <div key={slot.id} className="commit-withdrawal-row">
+                    <span className="commit-withdrawal-row__label">
+                      ✓{" "}
+                      {new Date(slot.startsAt).toLocaleString("en-US", {
+                        weekday: "short", month: "short", day: "numeric",
+                        hour: "numeric", minute: "2-digit",
+                      })}
+                      {tier?.tierLabel ? ` — ${tier.tierLabel}` : ""}
+                    </span>
+                    {locked || deadlinePassed ? (
+                      <span className="commit-withdrawal-row__locked">
+                        {locked ? "Locked" : "Deadline passed"}
                       </span>
-                    </div>
-
-                    <CommitButton
-                      slotId={slot.id}
-                      slotStatus={slot.status}
-                      committed={committed}
-                      isSignedIn={isSignedIn}
-                      isOrganizer={isOrganizer}
-                      deadlinePassed={deadlinePassed}
-                      costTiers={costTiers}
-                      myTier={myTierBySlotId[slot.id] ?? null}
-                    />
-
-                    {slotParticipants.length > 0 && (
-                      <div className="slot-card__participants">
-                        <ul className="participant-list">
-                          {slotParticipants.map((p, i) => (
-                            <li key={i} className="participant">
-                              {p.avatarUrl ? (
-                                <img
-                                  src={p.avatarUrl}
-                                  alt={p.name}
-                                  className="participant__avatar"
-                                  referrerPolicy="no-referrer"
-                                />
-                              ) : (
-                                <span className="participant__avatar participant__avatar--initials">
-                                  {p.name[0]?.toUpperCase() ?? "?"}
-                                </span>
-                              )}
-                              {p.userId ? (
-                                <a
-                                  href={`/users/${p.userId}`}
-                                  className="participant__name"
-                                >
-                                  {p.name}
-                                </a>
-                              ) : (
-                                <span className="participant__name">
-                                  {p.name}
-                                  <span className="participant__guest-badge">guest</span>
-                                </span>
-                              )}
-                              {p.reputationScore !== null &&
-                                p.reputationScore !== undefined &&
-                                !p.isGuest && (
-                                  <span className="participant__rep">
-                                    {Math.round(
-                                      Number(p.reputationScore)
-                                    )}%
-                                  </span>
-                                )}
-                              {p.isGuest && isOrganizer && p.guestEmail && (
-                                <span className="participant__email">{p.guestEmail}</span>
-                              )}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
+                    ) : (
+                      <fetcher.Form method="post" style={{ display: "inline" }}>
+                        <input type="hidden" name="intent" value="withdraw" />
+                        <input type="hidden" name="slotId" value={slot.id} />
+                        <button type="submit" className="btn btn--ghost btn--sm" disabled={pending}>
+                          Withdraw
+                        </button>
+                      </fetcher.Form>
                     )}
-                  </li>
+                  </div>
                 );
               })}
-            </ul>
+            </div>
+          )}
+
+          {!canCommit && committableSlotIds.length === 0 && myCommittedSlotIds.length === 0 && (
+            <p className="event-detail__no-slots">
+              {deadlinePassed ? "Commitment deadline has passed." : "No slots available for commitment."}
+            </p>
+          )}
+
+          {/* Participant lists per slot */}
+          {slots.some((s) => (bySlot[s.id]?.length ?? 0) > 0) && (
+            <div className="commit-participants-section">
+              <h3>Who's committed</h3>
+              {slots.map((slot) => {
+                const slotParticipants = bySlot[slot.id] ?? [];
+                if (slotParticipants.length === 0) return null;
+                return (
+                  <div key={slot.id} className="commit-participants-slot">
+                    <p className="commit-participants-slot__label">
+                      {new Date(slot.startsAt).toLocaleString("en-US", {
+                        weekday: "short", month: "short", day: "numeric",
+                      })}
+                      {" — "}{slotParticipants.length} committed
+                    </p>
+                    <ul className="participant-list">
+                      {slotParticipants.map((p, i) => (
+                        <li key={i} className="participant">
+                          {p.avatarUrl ? (
+                            <img src={p.avatarUrl} alt={p.name} className="participant__avatar" referrerPolicy="no-referrer" />
+                          ) : (
+                            <span className="participant__avatar participant__avatar--initials">
+                              {p.name[0]?.toUpperCase() ?? "?"}
+                            </span>
+                          )}
+                          {p.userId ? (
+                            <a href={`/users/${p.userId}`} className="participant__name">{p.name}</a>
+                          ) : (
+                            <span className="participant__name">{p.name}<span className="participant__guest-badge">guest</span></span>
+                          )}
+                          {p.reputationScore !== null && !p.isGuest && (
+                            <span className="participant__rep">{Math.round(Number(p.reputationScore))}%</span>
+                          )}
+                          {p.isGuest && isOrganizer && p.guestEmail && (
+                            <span className="participant__email">{p.guestEmail}</span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       </div>
