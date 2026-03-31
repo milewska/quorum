@@ -10,7 +10,7 @@ import { SlotPicker } from "~/components/SlotPicker";
 import { CostTierEditor } from "~/components/CostTierEditor";
 import type { CostTier } from "~/components/CostTierEditor";
 import type { SlotInput } from "~/components/SlotPicker";
-import { TimezonePicker } from "~/components/TimezonePicker";
+import { TimezonePicker, localToUTC } from "~/components/TimezonePicker";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -174,7 +174,7 @@ export async function action(args: Route.ActionArgs) {
       location,
       visibility,
       threshold,
-      deadline: deadline.toISOString(),
+      deadline: localToUTC(deadlineStr, timezone),
       imageKey,
       costTiersJson: costTiers.length > 0 ? JSON.stringify(costTiers) : null,
       priceQuorumCents,
@@ -188,8 +188,8 @@ export async function action(args: Route.ActionArgs) {
     await db.insert(timeSlots).values(
       slots.map((s) => ({
         eventId: created.id,
-        startsAt: new Date(s.startsAt).toISOString(),
-        endsAt: new Date(s.endsAt).toISOString(),
+        startsAt: localToUTC(s.startsAt, timezone),
+        endsAt: localToUTC(s.endsAt, timezone),
       }))
     );
   }

@@ -115,3 +115,62 @@ export function tzAbbreviation(timezone: string): string {
     return "";
   }
 }
+
+/**
+ * Convert a timezone-naive datetime-local string (e.g. "2026-04-08T11:00")
+ * to a UTC ISO string, interpreting the input as local time in the given IANA timezone.
+ *
+ * Use this on the server (CF Workers) when saving form values that were entered
+ * in the event's timezone but arrive without offset info.
+ */
+export function localToUTC(localStr: string, timezone: string): string {
+  // Treat the naive string as if it were UTC to get a reference timestamp
+  const naive = new Date(localStr.endsWith("Z") ? localStr : localStr + "Z");
+  // Find what this UTC instant looks like in the target timezone
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  const parts = fmt.formatToParts(naive);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "0";
+  const h = get("hour") === "24" ? 0 : parseInt(get("hour"));
+  const tzMs = Date.UTC(
+    parseInt(get("year")),
+    parseInt(get("month")) - 1,
+    parseInt(get("day")),
+    h,
+    parseInt(get("minute")),
+    parseInt(get("second")),
+  );
+  // offset = how far the timezone representation is from the naive UTC value
+  const offsetMs = tzMs - naive.getTime();
+  // Subtract the offset to get the true UTC equivalent
+  return new Date(naive.getTime() - offsetMs).toISOString();
+}
+
+/**
+ * Convert a UTC ISO string to a datetime-local string in a given IANA timezone.
+ * Returns "YYYY-MM-DDTHH:mm" suitable for <input type="datetime-local">.
+ */
+export function utcToLocalStr(utcStr: string | Date, timezone: string): string {
+  const date = typeof utcStr === "string" ? new Date(utcStr) : utcStr;
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const parts = fmt.formatToParts(date);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
+  const h = get("hour") === "24" ? "00" : get("hour");
+  return `${get("year")}-${get("month")}-${get("day")}T${h}:${get("minute")}`;
+}
