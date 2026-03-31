@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, sql as drizzleSql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { Form, redirect, useActionData, useFetcher, useLoaderData } from "react-router";
 import { requireSession } from "~/auth.server";
 import { getEnv } from "~/env.server";
@@ -224,7 +224,7 @@ export async function action(args: Route.ActionArgs) {
       // Count distinct confirmed/completed events they committed to
       const [committedRow] = await db
         .select({
-          count: drizzleSql<number>`count(distinct ${commitments.eventId})`,
+          count: sql<number>`count(distinct ${commitments.eventId})`,
         })
         .from(commitments)
         .innerJoin(events, eq(events.id, commitments.eventId))
@@ -238,7 +238,7 @@ export async function action(args: Route.ActionArgs) {
 
       // Count events they registered for
       const [registeredRow] = await db
-        .select({ count: drizzleSql<number>`count(*)` })
+        .select({ count: sql<number>`count(*)` })
         .from(attendance)
         .where(
           and(eq(attendance.userId, userId), eq(attendance.registered, true))

@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql as drizzleSql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { Link, redirect, useFetcher, useLoaderData } from "react-router";
 import { useState } from "react";
 import { getSession, requireSession } from "~/auth.server";
@@ -151,7 +151,7 @@ export async function loader(args: Route.LoaderArgs) {
     ? await db
         .select({
           slotId: commitments.timeSlotId,
-          totalCents: drizzleSql<number>`coalesce(sum(${commitments.tierAmount}), 0)`,
+          totalCents: sql<number>`coalesce(sum(${commitments.tierAmount}), 0)`,
         })
         .from(commitments)
         .where(and(eq(commitments.eventId, params.id), isNull(commitments.withdrawnAt)))
