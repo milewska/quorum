@@ -247,7 +247,7 @@ export async function action(args: Route.ActionArgs) {
         ) {
           await db
             .update(events)
-            .set({ status: "quorum_reached", updatedAt: new Date() })
+            .set({ status: "quorum_reached", updatedAt: new Date().toISOString() })
             .where(eq(events.id, params.id));
         }
 
@@ -318,7 +318,7 @@ export async function action(args: Route.ActionArgs) {
     if (existing) {
       await db
         .update(commitments)
-        .set({ withdrawnAt: new Date() })
+        .set({ withdrawnAt: new Date().toISOString() })
         .where(eq(commitments.id, existing.id));
 
       const newCount = Math.max(0, slot.commitmentCount - 1);
@@ -349,7 +349,7 @@ export async function action(args: Route.ActionArgs) {
         if (stillQuorumSlots.length === 0 && eventData.event.status === "quorum_reached") {
           await db
             .update(events)
-            .set({ status: "active", updatedAt: new Date() })
+            .set({ status: "active", updatedAt: new Date().toISOString() })
             .where(eq(events.id, params.id));
         }
       }

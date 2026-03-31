@@ -141,7 +141,7 @@ export async function action(args: Route.ActionArgs) {
     // Confirm the event and store registration URL
     await db
       .update(events)
-      .set({ status: "confirmed", registrationUrl, updatedAt: new Date() })
+      .set({ status: "confirmed", registrationUrl, updatedAt: new Date().toISOString() })
       .where(eq(events.id, params.id));
 
     // Email all committed participants on this slot
@@ -202,14 +202,14 @@ export async function action(args: Route.ActionArgs) {
     if (existing) {
       await db
         .update(attendance)
-        .set({ registered, markedAt: new Date() })
+        .set({ registered, markedAt: new Date().toISOString() })
         .where(eq(attendance.id, existing.id));
     } else {
       await db.insert(attendance).values({
         userId: targetUserId,
         eventId: params.id,
         registered,
-        markedAt: new Date(),
+        markedAt: new Date().toISOString(),
       });
     }
     return { ok: true };
@@ -223,7 +223,7 @@ export async function action(args: Route.ActionArgs) {
     // Mark event as completed
     await db
       .update(events)
-      .set({ status: "completed", updatedAt: new Date() })
+      .set({ status: "completed", updatedAt: new Date().toISOString() })
       .where(eq(events.id, params.id));
 
     // Recalculate reputation for all participants who committed to this event
@@ -267,7 +267,7 @@ export async function action(args: Route.ActionArgs) {
 
       await db
         .update(users)
-        .set({ reputationScore: String(newScore) })
+        .set({ reputationScore: newScore })
         .where(eq(users.id, userId));
     }
 

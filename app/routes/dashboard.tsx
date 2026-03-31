@@ -94,7 +94,7 @@ export async function action(args: Route.ActionArgs) {
 
   await db
     .update(commitments)
-    .set({ withdrawnAt: new Date() })
+    .set({ withdrawnAt: new Date().toISOString() })
     .where(eq(commitments.id, commitment.id));
   await db
     .update(timeSlots)

@@ -29,6 +29,7 @@ export async function expireOverdueEvents(
   if (eventIds.length === 0) return;
 
   const now = new Date();
+  const nowISO = now.toISOString();
 
   // Find events in the given set that are still "active" and past deadline
   const overdueEvents = await db
@@ -44,7 +45,7 @@ export async function expireOverdueEvents(
       and(
         inArray(schema.events.id, eventIds),
         eq(schema.events.status, "active"),
-        lt(schema.events.deadline, now)
+        lt(schema.events.deadline, nowISO)
       )
     );
 
@@ -52,7 +53,7 @@ export async function expireOverdueEvents(
     // Mark expired
     await db
       .update(schema.events)
-      .set({ status: "expired", updatedAt: now })
+      .set({ status: "expired", updatedAt: nowISO })
       .where(eq(schema.events.id, ev.id));
 
     // Notify organizer + committed participants (fire-and-forget)

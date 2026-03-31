@@ -182,12 +182,12 @@ export async function action(args: Route.ActionArgs) {
       location,
       visibility,
       threshold,
-      deadline,
+      deadline: deadline.toISOString(),
       imageKey,
       costTiersJson: costTiers.length > 0 ? JSON.stringify(costTiers) : null,
       priceQuorumCents,
       status: newStatus,
-      updatedAt: new Date(),
+      updatedAt: new Date().toISOString(),
     })
     .where(eq(events.id, params.id));
 
@@ -197,8 +197,8 @@ export async function action(args: Route.ActionArgs) {
     await db.insert(timeSlots).values(
       slots.map((s) => ({
         eventId: params.id,
-        startsAt: new Date(s.startsAt),
-        endsAt: new Date(s.endsAt),
+        startsAt: new Date(s.startsAt).toISOString(),
+        endsAt: new Date(s.endsAt).toISOString(),
       }))
     );
   }
