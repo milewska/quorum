@@ -122,7 +122,7 @@ a {
 
 .site-footer__build {
   font-size: 0.75rem;
-  color: var(--color-border);
+  color: var(--color-muted);
   letter-spacing: 0.02em;
 }
 
@@ -2122,6 +2122,10 @@ ing (manage page) ───�
 .commit-slot__badge--quorum {
   color: var(--color-success);
   background: rgba(52, 199, 89, 0.12);
+}
+.commit-slot__badge--locked {
+  color: #6b7280;
+  background: #f3f4f6;
 }
 .commit-slot__progress {
   width: 6rem;
