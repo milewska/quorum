@@ -144,17 +144,17 @@ export default function Index() {
           <div className="hp-mock-wrap">
             <div className="hp-mock-card">
               <div className="hp-mock-card__top">
-                <span className="hp-mock-card__title">Thursday Night Jazz</span>
-                <span className="badge badge--active">Active</span>
+                <span className="hp-mock-card__title">Dragon Gathering Kaua'i</span>
+                <span className="badge badge--quorum_reached">Quorum Reached</span>
               </div>
               <p className="hp-mock-card__meta">
-                Fri Apr 4 · 7 – 10 PM &nbsp;·&nbsp; Chicago, IL
+                Kaua'i, HI &nbsp;·&nbsp; Commitment-driven
               </p>
               <div className="hp-mock-bar-row">
                 <div className="hp-mock-bar">
-                  <div className="hp-mock-bar__fill" style={{ width: "72%" }} />
+                  <div className="hp-mock-bar__fill" style={{ width: "100%" }} />
                 </div>
-                <span className="hp-mock-card__count">18 / 25 committed</span>
+                <span className="hp-mock-card__count">16 / 4 committed</span>
               </div>
             </div>
           </div>
