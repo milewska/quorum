@@ -476,13 +476,14 @@ export default function EventDetail() {
 
           <p className="event-detail__meta">
             {event.location} &middot;{" "}
-            <span className="event-detail__countdown">{countdown}</span>
+            <span className="event-detail__countdown" suppressHydrationWarning>{countdown}</span>
             {" "}&middot; deadline{" "}
-            {deadlineDate.toLocaleDateString("en-US", {
+            {new Intl.DateTimeFormat("en-US", {
               month: "long",
               day: "numeric",
               year: "numeric",
-            })}
+              timeZone: event.timezone,
+            }).format(deadlineDate)}
           </p>
           <p className="event-detail__meta">
             Organised by {organizerName} &middot; Quorum: {event.threshold}{" "}
@@ -648,7 +649,8 @@ export default function EventDetail() {
                               {formatTimeOnly(slot.endsAt, event.timezone)}
                             </div>
                             {alreadyCommitted && <span className="commit-slot__badge commit-slot__badge--you">You're in</span>}
-                            {locked && !alreadyCommitted && <span className="commit-slot__badge commit-slot__badge--quorum">Quorum reached</span>}
+                            {slot.status === "quorum_reached" && !alreadyCommitted && <span className="commit-slot__badge commit-slot__badge--quorum">Quorum reached — join now</span>}
+                            {locked && !alreadyCommitted && <span className="commit-slot__badge commit-slot__badge--locked">Locked by host</span>}
                           </div>
                           <div className="commit-slot__progress">
                             <div className="slot-card__bar"><div className="slot-card__fill" style={{ width: `${pct}%` }} /></div>
@@ -691,7 +693,8 @@ export default function EventDetail() {
                             {formatTimeOnly(slot.endsAt, event.timezone)}
                           </div>
                           {alreadyCommitted && <span className="commit-slot__badge commit-slot__badge--you">You're in</span>}
-                          {locked && <span className="commit-slot__badge commit-slot__badge--quorum">Quorum reached</span>}
+                          {slot.status === "quorum_reached" && <span className="commit-slot__badge commit-slot__badge--quorum">Quorum reached</span>}
+                          {locked && <span className="commit-slot__badge commit-slot__badge--locked">Locked by host</span>}
                           {slotParticipants.length > 0 && (
                             <span className="commit-slot__badge" style={{ color: "var(--color-muted)" }}>
                               {slotParticipants.length} committed

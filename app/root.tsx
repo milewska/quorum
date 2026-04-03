@@ -119,7 +119,7 @@ export default function App() {
         <p className="site-footer__copy">
           &copy; {new Date().getFullYear()} Quorum &middot; Built in Hawai'i
         </p>
-        <p className="site-footer__build">
+        <p className="site-footer__build" suppressHydrationWarning>
           v {__GIT_COMMIT_HASH__} &middot; Built {new Intl.DateTimeFormat("en-US", {
             timeZone: "Pacific/Honolulu",
             month: "short",
