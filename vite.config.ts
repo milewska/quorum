@@ -14,6 +14,17 @@ try {
   // not a git repo or git not available
 }
 
+const buildDate = new Date();
+const buildTimestampFormatted = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Pacific/Honolulu",
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  timeZoneName: "short",
+}).format(buildDate);
+
 export default defineConfig({
   plugins: [
     cloudflareDevProxy({
@@ -30,7 +41,8 @@ export default defineConfig({
   },
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
-    __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+    __BUILD_TIME__: JSON.stringify(buildDate.toISOString()),
+    __BUILD_TIMESTAMP_FORMATTED__: JSON.stringify(buildTimestampFormatted),
     __GIT_COMMIT_HASH__: JSON.stringify(gitHash),
   },
 });

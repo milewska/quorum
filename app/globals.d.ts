@@ -1,4 +1,5 @@
 // Injected by vite.config.ts at build time
 declare const __APP_VERSION__: string;
 declare const __BUILD_TIME__: string;
+declare const __BUILD_TIMESTAMP_FORMATTED__: string;
 declare const __GIT_COMMIT_HASH__: string;

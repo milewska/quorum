@@ -246,6 +246,9 @@ export async function action(args: Route.ActionArgs) {
     if (!dbUserId && !guestName) {
       return { error: "Please enter your name." };
     }
+    if (!dbUserId && !guestEmail) {
+      return { error: "Please enter your email so the host can reach you." };
+    }
     if (dbUserId && eventData.event.organizerId === dbUserId) {
       return { error: "Organizers cannot commit to their own event." };
     }
@@ -580,10 +583,10 @@ export default function EventDetail() {
                       <div className="commit-identity__guest">
                         <div className="commit-identity__fields">
                           <input type="text" name="guestName" placeholder="Your name *" required className="field__input commit-identity__input" />
-                          <input type="email" name="guestEmail" placeholder="Email (host only)" className="field__input commit-identity__input" />
-                          <input type="tel" name="guestPhone" placeholder="Phone (host only)" className="field__input commit-identity__input" />
+                          <input type="email" name="guestEmail" placeholder="Email * (only seen by host)" required className="field__input commit-identity__input" />
+                          <input type="tel" name="guestPhone" placeholder="Phone (only seen by host)" className="field__input commit-identity__input" />
                         </div>
-                        <p className="commit-identity__privacy">Your name is public. Email &amp; phone are only visible to the host.</p>
+                        <p className="commit-identity__privacy">Your name is public. Email and phone are only visible to the event host.</p>
                         <a href="/auth/login" className="btn btn--ghost btn--sm commit-identity__signin">
                           Sign in with Google
                         </a>

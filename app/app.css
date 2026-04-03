@@ -1056,6 +1056,11 @@ a {
   padding: 0.3125rem 0.75rem;
   font-size: 0.8125rem;
 }
+
+.btn--xs {
+  padding: 0.15rem 0.5rem;
+  font-size: 0.75rem;
+}
 /* ─── Browse bar ──────────────────────────────────────────────────────────── */
 .browse-bar {
   display: flex;
@@ -1696,22 +1701,66 @@ a {
 .manage-participant-list {
   list-style: none;
   padding: 0;
-  margin: 0;
+  margin: 0.5rem 0 0;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 0.375rem;
 }
 
-.manage-participant-list li {
+.manage-participant-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
   background: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: 99px;
-  padding: 0.2rem 0.65rem;
+  border-radius: 8px;
+  padding: 0.375rem 0.75rem;
   font-size: 0.8125rem;
-                                   age                                   age -d                     ap: 0.75rem;
 }
 
-.manag.manag.manform__f.manag.manag.manform__f.  .manag.manag.ma column;
+.manage-participant-name {
+  font-weight: 500;
+}
+
+.manage-participant-badge {
+  display: inline-block;
+  background: #f3f4f6;
+  color: var(--color-muted);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.6875rem;
+  margin-left: 0.25rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.manage-participant-contact {
+  color: var(--color-muted);
+  font-size: 0.75rem;
+}
+
+.manage-participant-remove {
+  margin-left: auto;
+  color: #ef4444;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+}
+
+.manage-participant-remove:hover {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.manage-confirm-form__hint {
+  font-size: 0.8125rem;
+  color: var(--color-muted);
+  margin: 0.25rem 0 0;
+}
+
+.manage-confirm-form__field {
+  display: flex;
+  flex-direction: column;
   gap: 0.375rem;
 }
 

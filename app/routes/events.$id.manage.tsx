@@ -36,9 +36,10 @@ export async function loader(args: Route.LoaderArgs) {
     .where(eq(timeSlots.eventId, params.id))
     .orderBy(timeSlots.startsAt);
 
-  // Load committed participants per slot (with userId for attendance tracking)
-  const participantRows = await db
+  // Load committed participants per slot — signed-in users
+  const signedInRows = await db
     .select({
+      commitmentId: commitments.id,
       slotId: commitments.timeSlotId,
       userId: users.id,
       name: users.fullName,
@@ -51,15 +52,46 @@ export async function loader(args: Route.LoaderArgs) {
     )
     .orderBy(commitments.createdAt);
 
+  // Load guest participants (userId is null)
+  const guestRows = await db
+    .select({
+      commitmentId: commitments.id,
+      slotId: commitments.timeSlotId,
+      name: commitments.guestName,
+      email: commitments.guestEmail,
+      phone: commitments.guestPhone,
+    })
+    .from(commitments)
+    .where(
+      and(
+        eq(commitments.eventId, params.id),
+        isNull(commitments.withdrawnAt),
+        isNull(commitments.userId),
+      )
+    )
+    .orderBy(commitments.createdAt);
+
   const participantsBySlot: Record<
     string,
-    { userId: string; name: string; email: string }[]
+    { commitmentId: string; userId: string | null; name: string; email: string | null; phone?: string | null; isGuest: boolean }[]
   > = {};
-  for (const p of participantRows) {
+  for (const p of signedInRows) {
     (participantsBySlot[p.slotId] ??= []).push({
+      commitmentId: p.commitmentId,
       userId: p.userId,
       name: p.name,
       email: p.email,
+      isGuest: false,
+    });
+  }
+  for (const p of guestRows) {
+    (participantsBySlot[p.slotId] ??= []).push({
+      commitmentId: p.commitmentId,
+      userId: null,
+      name: p.name ?? "Guest",
+      email: p.email,
+      phone: p.phone,
+      isGuest: true,
     });
   }
 
@@ -131,7 +163,7 @@ export async function action(args: Route.ActionArgs) {
       .set({ status: "confirmed", registrationUrl, updatedAt: new Date().toISOString() })
       .where(eq(events.id, params.id));
 
-    // Email all committed participants on this slot
+    // Email all committed participants on this slot (signed-in + guests)
     const slotDate = formatInTimezone(slot.startsAt, event.timezone ?? "Pacific/Honolulu", {
       weekday: "long",
       month: "long",
@@ -143,7 +175,8 @@ export async function action(args: Route.ActionArgs) {
     const baseUrl = new URL(request.url).origin;
 
     try {
-      const participantRows = await db
+      // Signed-in user emails
+      const signedInEmails = await db
         .select({ email: users.email })
         .from(commitments)
         .innerJoin(users, eq(users.id, commitments.userId))
@@ -153,7 +186,25 @@ export async function action(args: Route.ActionArgs) {
             isNull(commitments.withdrawnAt)
           )
         );
-      for (const p of participantRows) {
+
+      // Guest emails
+      const guestEmails = await db
+        .select({ email: commitments.guestEmail })
+        .from(commitments)
+        .where(
+          and(
+            eq(commitments.timeSlotId, slotId),
+            isNull(commitments.withdrawnAt),
+            isNull(commitments.userId),
+          )
+        );
+
+      const allEmails = [
+        ...signedInEmails.map((r) => r.email),
+        ...guestEmails.map((r) => r.email).filter(Boolean),
+      ] as string[];
+
+      for (const email of allEmails) {
         const tpl = eventConfirmedEmail(
           event.title,
           params.id,
@@ -161,7 +212,7 @@ export async function action(args: Route.ActionArgs) {
           registrationUrl,
           baseUrl
         );
-        await sendMail(env, { to: p.email, ...tpl });
+        await sendMail(env, { to: email, ...tpl });
       }
     } catch (e) {
       console.error("Email send failed after confirmation:", e);
@@ -256,6 +307,56 @@ export async function action(args: Route.ActionArgs) {
         .update(users)
         .set({ reputationScore: newScore })
         .where(eq(users.id, userId));
+    }
+
+    return redirect(`/events/${params.id}/manage`);
+  }
+
+  // ── Remove participant (organizer kicks a duplicate or wrong entry) ────────
+  if (intent === "remove_participant") {
+    const commitmentId = form.get("commitmentId") as string;
+    if (!commitmentId) return { error: "Missing commitment." };
+
+    // Verify the commitment belongs to this event
+    const [commitment] = await db
+      .select({ id: commitments.id, timeSlotId: commitments.timeSlotId })
+      .from(commitments)
+      .where(
+        and(
+          eq(commitments.id, commitmentId),
+          eq(commitments.eventId, params.id),
+          isNull(commitments.withdrawnAt)
+        )
+      )
+      .limit(1);
+    if (!commitment) return { error: "Commitment not found." };
+
+    // Soft-delete the commitment
+    await db
+      .update(commitments)
+      .set({ withdrawnAt: new Date().toISOString() })
+      .where(eq(commitments.id, commitment.id));
+
+    // Decrement the slot counter
+    const [slot] = await db
+      .select({ commitmentCount: timeSlots.commitmentCount, status: timeSlots.status })
+      .from(timeSlots)
+      .where(eq(timeSlots.id, commitment.timeSlotId))
+      .limit(1);
+    if (slot) {
+      const newCount = Math.max(0, slot.commitmentCount - 1);
+      await db
+        .update(timeSlots)
+        .set({ commitmentCount: newCount })
+        .where(eq(timeSlots.id, commitment.timeSlotId));
+
+      // If this drops below threshold and slot was quorum_reached, revert
+      if (slot.status === "quorum_reached" && newCount < event.threshold) {
+        await db
+          .update(timeSlots)
+          .set({ status: "active" })
+          .where(eq(timeSlots.id, commitment.timeSlotId));
+      }
     }
 
     return redirect(`/events/${params.id}/manage`);
@@ -362,8 +463,22 @@ export default function ManageEvent() {
 
                     {participants.length > 0 && (
                       <ul className="manage-participant-list">
-                        {participants.map((p, i) => (
-                          <li key={i}>{p.name}</li>
+                        {participants.map((p) => (
+                          <li key={p.commitmentId} className="manage-participant-item">
+                            <span className="manage-participant-name">
+                              {p.name}
+                              {p.isGuest && <span className="manage-participant-badge">guest</span>}
+                            </span>
+                            {p.email && <span className="manage-participant-contact">{p.email}</span>}
+                            {p.isGuest && p.phone && <span className="manage-participant-contact">{p.phone}</span>}
+                            <Form method="post" style={{ display: "inline" }} onSubmit={(e) => {
+                              if (!window.confirm(`Remove ${p.name} from this slot?`)) e.preventDefault();
+                            }}>
+                              <input type="hidden" name="intent" value="remove_participant" />
+                              <input type="hidden" name="commitmentId" value={p.commitmentId} />
+                              <button type="submit" className="btn btn--ghost btn--xs manage-participant-remove">Remove</button>
+                            </Form>
+                          </li>
                         ))}
                       </ul>
                     )}
@@ -462,11 +577,23 @@ export default function ManageEvent() {
                         </p>
                         <ul className="manage-attendance-list">
                           {participants.map((p) => {
+                            // Attendance tracking only works for signed-in users (DB requires userId)
+                            if (p.isGuest) {
+                              return (
+                                <li key={p.commitmentId} className="manage-attendance-item">
+                                  <span className="manage-attendance-btn" title="Guest — attendance tracked by host">—</span>
+                                  <span className="manage-attendance-name">
+                                    {p.name} <span className="manage-participant-badge">guest</span>
+                                    {p.email && <span className="manage-participant-contact" style={{ marginLeft: "0.5rem" }}>{p.email}</span>}
+                                  </span>
+                                </li>
+                              );
+                            }
                             const checked =
-                              optimisticAttendance[p.userId] ?? false;
+                              optimisticAttendance[p.userId!] ?? false;
                             return (
                               <li
-                                key={p.userId}
+                                key={p.commitmentId}
                                 className="manage-attendance-item"
                               >
                                 <attendanceFetcher.Form
@@ -481,7 +608,7 @@ export default function ManageEvent() {
                                   <input
                                     type="hidden"
                                     name="userId"
-                                    value={p.userId}
+                                    value={p.userId!}
                                   />
                                   <input
                                     type="hidden"
@@ -561,8 +688,22 @@ export default function ManageEvent() {
                     </div>
                     {participants.length > 0 && (
                       <ul className="manage-participant-list">
-                        {participants.map((p, i) => (
-                          <li key={i}>{p.name}</li>
+                        {participants.map((p) => (
+                          <li key={p.commitmentId} className="manage-participant-item">
+                            <span className="manage-participant-name">
+                              {p.name}
+                              {p.isGuest && <span className="manage-participant-badge">guest</span>}
+                            </span>
+                            {p.email && <span className="manage-participant-contact">{p.email}</span>}
+                            {p.isGuest && p.phone && <span className="manage-participant-contact">{p.phone}</span>}
+                            <Form method="post" style={{ display: "inline" }} onSubmit={(e) => {
+                              if (!window.confirm(`Remove ${p.name} from this slot?`)) e.preventDefault();
+                            }}>
+                              <input type="hidden" name="intent" value="remove_participant" />
+                              <input type="hidden" name="commitmentId" value={p.commitmentId} />
+                              <button type="submit" className="btn btn--ghost btn--xs manage-participant-remove">Remove</button>
+                            </Form>
+                          </li>
                         ))}
                       </ul>
                     )}
