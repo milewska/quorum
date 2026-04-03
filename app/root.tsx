@@ -120,15 +120,7 @@ export default function App() {
           &copy; {new Date().getFullYear()} Quorum &middot; Built in Hawai'i
         </p>
         <p className="site-footer__build" suppressHydrationWarning>
-          v {__GIT_COMMIT_HASH__} &middot; Built {new Intl.DateTimeFormat("en-US", {
-            timeZone: "Pacific/Honolulu",
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-            hour: "numeric",
-            minute: "2-digit",
-            timeZoneName: "short",
-          }).format(new Date(__BUILD_TIME__))}
+          v {__GIT_COMMIT_HASH__} &middot; Built {__BUILD_TIMESTAMP_FORMATTED__}
         </p>
       </footer>
     </div>

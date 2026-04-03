@@ -200,6 +200,10 @@ export async function loader(args: Route.LoaderArgs) {
     myTierBySlotId,
     costTiers,
     pledgedBySlotId,
+    // Computed server-side so SSR and client hydration see the same value.
+    // If computed client-side (Date.now()), a timing diff flips canCommit's
+    // ternary branch (<form> vs <div>), causing React error #418.
+    deadlinePassed: new Date(row.event.deadline) < new Date(),
   };
 }
 
@@ -412,6 +416,7 @@ export default function EventDetail() {
     myTierBySlotId,
     costTiers,
     pledgedBySlotId,
+    deadlinePassed,
   } = useLoaderData<typeof loader>();
 
   const fetcher = useFetcher();
@@ -419,7 +424,6 @@ export default function EventDetail() {
 
   const deadlineDate = new Date(event.deadline);
   const countdown = deadlineCountdown(deadlineDate);
-  const deadlinePassed = deadlineDate.getTime() <= Date.now();
 
   // Batch commit: track which slots are checked
   const [checkedSlots, setCheckedSlots] = useState<Set<string>>(new Set());
@@ -488,7 +492,7 @@ export default function EventDetail() {
               timeZone: event.timezone,
             }).format(deadlineDate)}
           </p>
-          <p className="event-detail__meta">
+          <p className="event-detail__meta" suppressHydrationWarning>
             Organised by {organizerName} &middot; Quorum: {event.threshold}{" "}
             commitments &middot; {tzAbbreviation(event.timezone)}
           </p>
