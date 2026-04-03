@@ -108,15 +108,15 @@ export async function action(args: Route.ActionArgs) {
       return { error: "Please enter a valid URL (include https://)." };
     }
 
-    // Verify the slot belongs to this event and is quorum_reached
+    // Verify the slot belongs to this event and is not already confirmed
     const [slot] = await db
       .select()
       .from(timeSlots)
       .where(and(eq(timeSlots.id, slotId), eq(timeSlots.eventId, params.id)))
       .limit(1);
     if (!slot) return { error: "Slot not found." };
-    if (slot.status !== "quorum_reached") {
-      return { error: "This slot has not reached quorum yet." };
+    if (slot.status === "confirmed") {
+      return { error: "This slot is already confirmed." };
     }
 
     // Confirm the slot
@@ -368,7 +368,20 @@ export default function ManageEvent() {
                       </ul>
                     )}
 
-                    <Form method="post" className="manage-confirm-form">
+                    <Form
+                      method="post"
+                      className="manage-confirm-form"
+                      onSubmit={(e) => {
+                        const count = participants.length;
+                        if (
+                          !window.confirm(
+                            `Confirm this slot and email ${count} participant${count !== 1 ? "s" : ""}? This will notify everyone who committed.`
+                          )
+                        ) {
+                          e.preventDefault();
+                        }
+                      }}
+                    >
                       <input type="hidden" name="intent" value="confirm" />
                       <input type="hidden" name="slotId" value={slot.id} />
                       <div className="manage-confirm-form__field">
@@ -391,6 +404,9 @@ export default function ManageEvent() {
                       <button type="submit" className="btn btn--primary">
                         Confirm this slot →
                       </button>
+                      <p className="manage-confirm-form__hint">
+                        This will email all committed participants with the registration link.
+                      </p>
                     </Form>
                   </li>
                 );
@@ -519,12 +535,15 @@ export default function ManageEvent() {
           </div>
         )}
 
-        {/* Active slots (still gathering commitments) */}
+        {/* Active slots — host can confirm ANY slot, not just quorum-reached */}
         {activeSlots.length > 0 && (
           <div className="manage-section">
             <h2 className="manage-section__title">
               ⏳ Gathering commitments ({activeSlots.length})
             </h2>
+            <p className="manage-section__desc">
+              You can confirm any slot — quorum is a minimum, not a requirement to proceed.
+            </p>
             <ul className="manage-slot-list">
               {activeSlots.map((slot) => {
                 const participants = participantsBySlot[slot.id] ?? [];
@@ -547,6 +566,47 @@ export default function ManageEvent() {
                         ))}
                       </ul>
                     )}
+
+                    <Form
+                      method="post"
+                      className="manage-confirm-form"
+                      onSubmit={(e) => {
+                        const count = participants.length;
+                        if (
+                          !window.confirm(
+                            `Confirm this slot and email ${count} participant${count !== 1 ? "s" : ""}? This will notify everyone who committed.`
+                          )
+                        ) {
+                          e.preventDefault();
+                        }
+                      }}
+                    >
+                      <input type="hidden" name="intent" value="confirm" />
+                      <input type="hidden" name="slotId" value={slot.id} />
+                      <div className="manage-confirm-form__field">
+                        <label
+                          htmlFor={`reg-active-${slot.id}`}
+                          className="manage-confirm-form__label"
+                        >
+                          Registration URL
+                        </label>
+                        <input
+                          id={`reg-active-${slot.id}`}
+                          type="url"
+                          name="registrationUrl"
+                          placeholder="https://..."
+                          required
+                          defaultValue={event.registrationUrl ?? ""}
+                          className="manage-confirm-form__input"
+                        />
+                      </div>
+                      <button type="submit" className="btn btn--primary btn--sm">
+                        Confirm this date
+                      </button>
+                      <p className="manage-confirm-form__hint">
+                        This will email all committed participants with the registration link.
+                      </p>
+                    </Form>
                   </li>
                 );
               })}

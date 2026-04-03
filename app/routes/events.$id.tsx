@@ -9,11 +9,7 @@ import { commitments, events, timeSlots, users } from "../../db/schema";
 import type { Route } from "./+types/events.$id";
 import type { CostTier } from "~/components/CostTierEditor";
 import { formatInTimezone, formatTimeOnly, tzAbbreviation } from "~/components/TimezonePicker";
-import {
-  sendMail,
-  quorumReachedOrganizerEmail,
-  quorumReachedParticipantEmail,
-} from "~/email.server";
+// Email imports removed — no auto-emails on quorum. Host confirms via manage page.
 import { expireOverdueEvents } from "~/expiry.server";
 
 // ─── SEO Meta (Open Graph + Twitter Cards) ───────────────────────────────────
@@ -293,7 +289,8 @@ export async function action(args: Route.ActionArgs) {
         .set({ commitmentCount: newCount })
         .where(eq(timeSlots.id, slotId));
 
-      // Quorum detection
+      // Quorum detection — update status only, NO auto-emails.
+      // Host decides when to confirm and trigger notifications.
       if (slot.status === "active" && newCount >= eventData.event.threshold) {
         await db
           .update(timeSlots)
@@ -306,31 +303,7 @@ export async function action(args: Route.ActionArgs) {
             .set({ status: "quorum_reached", updatedAt: new Date().toISOString() })
             .where(eq(events.id, params.id));
         }
-
-        // Quorum emails (fire-and-forget)
-        try {
-          const slotDate = formatInTimezone(slot.startsAt, eventData.event.timezone ?? "Pacific/Honolulu", {
-            weekday: "long", month: "long", day: "numeric", year: "numeric",
-            hour: "numeric", minute: "2-digit",
-          });
-          await sendMail(env, {
-            to: eventData.organizerEmail,
-            ...quorumReachedOrganizerEmail(eventData.event.title, params.id, slotDate, baseUrl),
-          });
-          const pRows = await db
-            .select({ email: users.email })
-            .from(commitments)
-            .innerJoin(users, eq(users.id, commitments.userId))
-            .where(and(eq(commitments.timeSlotId, slotId), isNull(commitments.withdrawnAt)));
-          for (const p of pRows) {
-            await sendMail(env, {
-              to: p.email,
-              ...quorumReachedParticipantEmail(eventData.event.title, params.id, slotDate, baseUrl),
-            });
-          }
-        } catch (e) {
-          console.error("Quorum email failed:", e);
-        }
+        // No emails here — host confirms via manage page, emails sent only then.
       }
     }
 
@@ -350,8 +323,9 @@ export async function action(args: Route.ActionArgs) {
       .limit(1);
     if (!slot) throw new Response("Slot not found", { status: 404 });
 
-    if (slot.status === "quorum_reached" || slot.status === "confirmed") {
-      throw new Response("Cannot withdraw after quorum is reached", { status: 403 });
+    // Only block withdrawal on confirmed slots — quorum is a minimum, not a lock
+    if (slot.status === "confirmed") {
+      throw new Response("Cannot withdraw from a confirmed slot", { status: 403 });
     }
 
     const [existing] = await db
@@ -464,12 +438,15 @@ export default function EventDetail() {
   );
 
   // Can this user commit? (not organizer, not past deadline)
+  // Allow commits while event is active, quorum_reached, or even confirmed
+  // (host may have confirmed one slot but others remain open)
   const canCommit = !isOrganizer && !deadlinePassed &&
-    (event.status === "active" || event.status === "quorum_reached");
+    (event.status === "active" || event.status === "quorum_reached" || event.status === "confirmed");
 
-  // Committable slots: not already committed by this user, still active
+  // Committable slots: not already committed by this user, not yet confirmed by host
+  // Quorum is a MINIMUM — more people can always join until the host confirms
   const committableSlotIds = slots
-    .filter((s) => !myCommittedSlotIds.includes(s.id) && s.status === "active")
+    .filter((s) => !myCommittedSlotIds.includes(s.id) && s.status !== "confirmed")
     .map((s) => s.id);
 
   const selectedTier = costTiers.find((t) => t.label === selectedTierLabel);
@@ -630,8 +607,8 @@ export default function EventDetail() {
                   <div className="commit-slots">
                     {slots.map((slot) => {
                       const alreadyCommitted = myCommittedSlotIds.includes(slot.id);
-                      const locked = slot.status === "quorum_reached" || slot.status === "confirmed";
-                      const canCheck = !alreadyCommitted && slot.status === "active";
+                      const locked = slot.status === "confirmed";
+                      const canCheck = !alreadyCommitted && slot.status !== "confirmed";
                       const isChecked = checkedSlots.has(slot.id);
                       const isPriceQuorum = event.priceQuorumCents != null;
                       const pledgedCents = pledgedBySlotId[slot.id] ?? 0;
@@ -680,7 +657,7 @@ export default function EventDetail() {
                 <div className="commit-slots">
                   {slots.map((slot) => {
                     const alreadyCommitted = myCommittedSlotIds.includes(slot.id);
-                    const locked = slot.status === "quorum_reached" || slot.status === "confirmed";
+                    const locked = slot.status === "confirmed";
                     const isPriceQuorum = event.priceQuorumCents != null;
                     const pledgedCents = pledgedBySlotId[slot.id] ?? 0;
                     const pct = isPriceQuorum
@@ -724,7 +701,7 @@ export default function EventDetail() {
               {myCommittedSlotIds.length > 0 && (
                 <div className="commit-withdrawals">
                   {slots.filter((s) => myCommittedSlotIds.includes(s.id)).map((slot) => {
-                    const locked = slot.status === "quorum_reached" || slot.status === "confirmed";
+                    const locked = slot.status === "confirmed";
                     const tier = myTierBySlotId[slot.id];
                     return (
                       <div key={slot.id} className="commit-withdrawal-row">

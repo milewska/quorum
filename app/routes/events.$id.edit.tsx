@@ -186,14 +186,54 @@ export async function action(args: Route.ActionArgs) {
     })
     .where(eq(events.id, params.id));
 
-  // ── Replace slots ─────────────────────────────────────────────────────────
-  await db.delete(timeSlots).where(eq(timeSlots.eventId, params.id));
-  if (slots.length > 0) {
+  // ── Upsert slots (preserve existing slots + their commitments) ───────────
+  // Load current slots from DB
+  const existingSlots = await db
+    .select({ id: timeSlots.id, startsAt: timeSlots.startsAt, endsAt: timeSlots.endsAt })
+    .from(timeSlots)
+    .where(eq(timeSlots.eventId, params.id));
+
+  // Convert incoming slots to UTC for comparison
+  const incomingSlots = slots.map((s) => ({
+    startsAt: localToUTC(s.startsAt, timezone),
+    endsAt: localToUTC(s.endsAt, timezone),
+  }));
+
+  // Match existing slots by start+end time (timestamp comparison — resilient to format differences)
+  // This preserves the slot ID + all attached commitments for unchanged slots.
+  const matchedExistingIds = new Set<string>();
+  const newSlots: { startsAt: string; endsAt: string }[] = [];
+
+  for (const incoming of incomingSlots) {
+    const inStart = new Date(incoming.startsAt).getTime();
+    const inEnd = new Date(incoming.endsAt).getTime();
+    const match = existingSlots.find(
+      (ex) =>
+        !matchedExistingIds.has(ex.id) &&
+        new Date(ex.startsAt).getTime() === inStart &&
+        new Date(ex.endsAt).getTime() === inEnd
+    );
+    if (match) {
+      matchedExistingIds.add(match.id);
+    } else {
+      newSlots.push(incoming);
+    }
+  }
+
+  // Delete only slots that were removed by the organizer (not in incoming set)
+  const slotsToDelete = existingSlots.filter((ex) => !matchedExistingIds.has(ex.id));
+  for (const slot of slotsToDelete) {
+    // This will cascade-delete commitments only for REMOVED slots
+    await db.delete(timeSlots).where(eq(timeSlots.id, slot.id));
+  }
+
+  // Insert only genuinely new slots
+  if (newSlots.length > 0) {
     await db.insert(timeSlots).values(
-      slots.map((s) => ({
+      newSlots.map((s) => ({
         eventId: params.id,
-        startsAt: localToUTC(s.startsAt, timezone),
-        endsAt: localToUTC(s.endsAt, timezone),
+        startsAt: s.startsAt,
+        endsAt: s.endsAt,
       }))
     );
   }
