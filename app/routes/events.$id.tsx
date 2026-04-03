@@ -111,6 +111,7 @@ export async function loader(args: Route.LoaderArgs) {
       slotId: commitments.timeSlotId,
       name: commitments.guestName,
       guestEmail: commitments.guestEmail,
+      guestPhone: commitments.guestPhone,
     })
     .from(commitments)
     .where(
@@ -131,6 +132,7 @@ export async function loader(args: Route.LoaderArgs) {
       reputationScore: p.reputationScore,
       isGuest: false,
       guestEmail: null as string | null,
+      guestPhone: null as string | null,
     })),
     ...guestParticipants.map((p) => ({
       slotId: p.slotId,
@@ -140,6 +142,7 @@ export async function loader(args: Route.LoaderArgs) {
       reputationScore: null as number | null,
       isGuest: true,
       guestEmail: p.guestEmail,
+      guestPhone: p.guestPhone,
     })),
   ];
 
@@ -234,16 +237,17 @@ export async function action(args: Route.ActionArgs) {
     const slotIds = ((form.get("slotIds") as string) ?? "").split(",").filter(Boolean);
     const guestName = (form.get("guestName") as string)?.trim() || null;
     const guestEmail = (form.get("guestEmail") as string)?.trim() || null;
+    const guestPhone = (form.get("guestPhone") as string)?.trim() || null;
     const tierLabel = (form.get("tierLabel") as string) || null;
     const tierAmountRaw = form.get("tierAmount") as string | null;
     const tierAmount = tierAmountRaw ? parseInt(tierAmountRaw, 10) : null;
 
-    if (slotIds.length === 0) return redirect(`/events/${params.id}`);
+    if (slotIds.length === 0) return { error: "Please select at least one time slot." };
     if (!dbUserId && !guestName) {
-      throw new Response("Please enter your name", { status: 400 });
+      return { error: "Please enter your name." };
     }
     if (dbUserId && eventData.event.organizerId === dbUserId) {
-      throw new Response("Organizers cannot commit to their own event", { status: 403 });
+      return { error: "Organizers cannot commit to their own event." };
     }
 
     // Load all target slots
@@ -281,6 +285,7 @@ export async function action(args: Route.ActionArgs) {
         tierAmount,
         guestName: dbUserId ? null : guestName,
         guestEmail: dbUserId ? null : guestEmail,
+        guestPhone: dbUserId ? null : guestPhone,
       });
 
       const newCount = slot.commitmentCount + 1;
@@ -574,8 +579,10 @@ export default function EventDetail() {
                       <div className="commit-identity__guest">
                         <div className="commit-identity__fields">
                           <input type="text" name="guestName" placeholder="Your name *" required className="field__input commit-identity__input" />
-                          <input type="email" name="guestEmail" placeholder="Email (only visible to host)" className="field__input commit-identity__input" />
+                          <input type="email" name="guestEmail" placeholder="Email (host only)" className="field__input commit-identity__input" />
+                          <input type="tel" name="guestPhone" placeholder="Phone (host only)" className="field__input commit-identity__input" />
                         </div>
+                        <p className="commit-identity__privacy">Your name is public. Email &amp; phone are only visible to the host.</p>
                         <a href="/auth/login" className="btn btn--ghost btn--sm commit-identity__signin">
                           Sign in with Google
                         </a>
@@ -597,6 +604,10 @@ export default function EventDetail() {
                         ))}
                       </div>
                     </div>
+                  )}
+
+                  {fetcher.data?.error && (
+                    <p className="commit-form__error">{fetcher.data.error}</p>
                   )}
 
                   <p className="commit-form__hint">
@@ -754,8 +765,10 @@ export default function EventDetail() {
                               {p.reputationScore !== null && !p.isGuest && (
                                 <span className="participant__rep">{Math.round(Number(p.reputationScore))}%</span>
                               )}
-                              {p.isGuest && isOrganizer && p.guestEmail && (
-                                <span className="participant__email">{p.guestEmail}</span>
+                              {p.isGuest && isOrganizer && (p.guestEmail || p.guestPhone) && (
+                                <span className="participant__email">
+                                  {[p.guestEmail, p.guestPhone].filter(Boolean).join(" · ")}
+                                </span>
                               )}
                             </li>
                           ))}

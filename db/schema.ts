@@ -125,6 +125,7 @@ export const commitments = sqliteTable("commitments", {
   // Guest fields — used when userId is null (no login)
   guestName: text("guest_name"),
   guestEmail: text("guest_email"), // only visible to event organizer
+  guestPhone: text("guest_phone"), // only visible to event organizer
 });
 
 // ─── Attendance ───────────────────────────────────────────────────────────────

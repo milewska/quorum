@@ -119,6 +119,17 @@ export default function App() {
         <p className="site-footer__copy">
           &copy; {new Date().getFullYear()} Quorum &middot; Built in Hawai'i
         </p>
+        <p className="site-footer__build">
+          v {__GIT_COMMIT_HASH__} &middot; Built {new Intl.DateTimeFormat("en-US", {
+            timeZone: "Pacific/Honolulu",
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+            timeZoneName: "short",
+          }).format(new Date(__BUILD_TIME__))}
+        </p>
       </footer>
     </div>
   );

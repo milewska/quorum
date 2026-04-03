@@ -1965,6 +1965,12 @@ ing (manage page) ───�
   white-space: nowrap;
   flex-shrink: 0;
 }
+.commit-identity__privacy {
+  width: 100%;
+  font-size: 0.75rem;
+  color: var(--color-muted);
+  margin-top: 0.25rem;
+}
 
 /* Tier chips */
 .commit-tiers {
@@ -2012,10 +2018,19 @@ ing (manage page) ───�
   color: var(--color-accent);
 }
 
-/* Hint */
+/* Hint + error */
 .commit-form__hint {
   font-size: 0.8125rem;
   color: var(--color-muted);
+  margin-bottom: 0.75rem;
+}
+.commit-form__error {
+  font-size: 0.8125rem;
+  color: #dc2626;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
   margin-bottom: 0.75rem;
 }
 
