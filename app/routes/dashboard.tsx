@@ -77,8 +77,9 @@ export async function action(args: Route.ActionArgs) {
     .where(eq(timeSlots.id, commitment.timeSlotId))
     .limit(1);
   if (!slot) throw new Response("Slot not found", { status: 404 });
-  if (slot.status === "quorum_reached" || slot.status === "confirmed") {
-    throw new Response("Cannot withdraw after quorum is reached", { status: 403 });
+  // Only block withdrawal on confirmed slots — quorum is a minimum, not a lock
+  if (slot.status === "confirmed") {
+    throw new Response("Cannot withdraw from a confirmed slot", { status: 403 });
   }
 
   await db
@@ -205,9 +206,8 @@ export default function Dashboard() {
         ) : (
           <ul className="dash-list">
             {myCommitments.map((c) => {
-              const locked =
-                c.slotStatus === "quorum_reached" ||
-                c.slotStatus === "confirmed";
+              // Only lock withdrawal on confirmed slots — quorum is a minimum
+              const locked = c.slotStatus === "confirmed";
               const pending =
                 fetcher.state !== "idle" &&
                 fetcher.formData?.get("commitmentId") === c.commitmentId;
