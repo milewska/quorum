@@ -83,6 +83,9 @@ export const timeSlots = sqliteTable("time_slots", {
   commitmentCount: integer("commitment_count").notNull().default(0),
   // 'active' | 'quorum_reached' | 'confirmed'
   status: text("status").notNull().default("active"),
+  // External registration URL for THIS slot — populated when organizer confirms.
+  // Per-slot (not per-event) so multi-slot events don't overwrite each other.
+  registrationUrl: text("registration_url"),
 });
 
 // ─── Sessions (Google OAuth) ──────────────────────────────────────────────────
@@ -134,9 +137,12 @@ export const attendance = sqliteTable("attendance", {
   id: text("id")
     .primaryKey()
     .$defaultFn(() => crypto.randomUUID()),
+  // Nullable — guest attendance rows key on commitmentId instead
   userId: text("user_id")
-    .notNull()
     .references(() => users.id),
+  // Used for guest attendance (userId null). One attendance row per commitment.
+  commitmentId: text("commitment_id")
+    .references(() => commitments.id, { onDelete: "cascade" }),
   eventId: text("event_id")
     .notNull()
     .references(() => events.id, { onDelete: "cascade" }),

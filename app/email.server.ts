@@ -108,6 +108,28 @@ export function eventExpiredOrganizerEmail(
   return { subject, html, text };
 }
 
+export function slotLostQuorumOrganizerEmail(
+  eventTitle: string,
+  eventId: string,
+  slotDate: string,
+  newCount: number,
+  threshold: number,
+  baseUrl: string
+): { subject: string; html: string; text: string } {
+  const manageUrl = `${baseUrl}/events/${eventId}/manage`;
+  const subject = `📉 ${eventTitle} — slot dropped below quorum`;
+  const html = `
+<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+  <h2 style="margin-top:0">Heads up — a slot lost quorum</h2>
+  <p>A participant just withdrew from the <strong>${slotDate}</strong> slot of <strong>${eventTitle}</strong>.</p>
+  <p>Current commitments: <strong>${newCount} / ${threshold}</strong>. The slot is back to active status.</p>
+  <p>You can still confirm this slot at any time — quorum is a floor, not a ceiling.</p>
+  <p><a href="${manageUrl}" style="display:inline-block;background:#6b7280;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600">Manage Event</a></p>
+</div>`.trim();
+  const text = `A participant withdrew from the ${slotDate} slot of "${eventTitle}". It's now at ${newCount}/${threshold} and back to active.\n\nManage: ${manageUrl}`;
+  return { subject, html, text };
+}
+
 export function eventExpiredParticipantEmail(
   eventTitle: string,
   eventId: string,

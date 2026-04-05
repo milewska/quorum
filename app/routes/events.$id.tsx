@@ -9,7 +9,9 @@ import { commitments, events, timeSlots, users } from "../../db/schema";
 import type { Route } from "./+types/events.$id";
 import type { CostTier } from "~/components/CostTierEditor";
 import { formatInTimezone, formatTimeOnly, tzAbbreviation } from "~/components/TimezonePicker";
-// Email imports removed — no auto-emails on quorum. Host confirms via manage page.
+// No auto-emails on quorum REACHED. Host confirms via manage page.
+// But DO notify host when a withdraw drops a slot BELOW quorum (B4).
+import { sendMail, slotLostQuorumOrganizerEmail } from "~/email.server";
 import { expireOverdueEvents } from "~/expiry.server";
 
 // ─── SEO Meta (Open Graph + Twitter Cards) ───────────────────────────────────
@@ -377,6 +379,29 @@ export async function action(args: Route.ActionArgs) {
             .set({ status: "active", updatedAt: new Date().toISOString() })
             .where(eq(events.id, params.id));
         }
+
+        // B4: notify organizer that this slot lost quorum
+        try {
+          const slotDate = formatInTimezone(slot.startsAt, eventData.event.timezone ?? "Pacific/Honolulu", {
+            weekday: "long",
+            month: "long",
+            day: "numeric",
+            year: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+          });
+          const tpl = slotLostQuorumOrganizerEmail(
+            eventData.event.title,
+            params.id,
+            slotDate,
+            newCount,
+            eventData.event.threshold,
+            baseUrl
+          );
+          await sendMail(env, { to: eventData.organizerEmail, ...tpl });
+        } catch (e) {
+          console.error("Slot-lost-quorum notification failed:", e);
+        }
       }
     }
   }
@@ -512,19 +537,39 @@ export default function EventDetail() {
             </div>
           )}
 
-          {event.status === "confirmed" && event.registrationUrl && myCommittedSlotIds.length > 0 && (
-            <div className="event-detail__registration">
-              <p className="event-detail__registration-msg">This event is confirmed! Register your spot:</p>
-              <a
-                href={event.registrationUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="btn btn--primary"
-              >
-                Register Now →
-              </a>
-            </div>
-          )}
+          {myCommittedSlotIds.length > 0 && (() => {
+            // Per-slot registration CTAs: show one button per confirmed slot
+            // the user is committed to. Falls back to event-level URL for
+            // slots confirmed before the per-slot URL migration.
+            const myConfirmedSlots = slots.filter(
+              (s) =>
+                s.status === "confirmed" &&
+                myCommittedSlotIds.includes(s.id) &&
+                (s.registrationUrl || event.registrationUrl)
+            );
+            if (myConfirmedSlots.length === 0) return null;
+            return (
+              <div className="event-detail__registration">
+                <p className="event-detail__registration-msg">
+                  {myConfirmedSlots.length === 1
+                    ? "This slot is confirmed! Register your spot:"
+                    : "These slots are confirmed! Register for each one:"}
+                </p>
+                {myConfirmedSlots.map((s) => (
+                  <a
+                    key={s.id}
+                    href={s.registrationUrl ?? event.registrationUrl!}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="btn btn--primary"
+                    style={{ marginRight: "0.5rem", marginBottom: "0.5rem" }}
+                  >
+                    Register for {formatInTimezone(s.startsAt, event.timezone, { weekday: "short", month: "short", day: "numeric" })} →
+                  </a>
+                ))}
+              </div>
+            );
+          })()}
 
           {isOrganizer && (
             <div className="event-detail__organizer-actions">

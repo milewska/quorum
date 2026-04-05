@@ -95,16 +95,33 @@ export async function loader(args: Route.LoaderArgs) {
     });
   }
 
-  // Attendance records for this event (userId -> registered)
+  // Attendance records for this event — dual-keyed (userId for signed-in, commitmentId for guests)
   const attendanceRows = await db
-    .select({ userId: attendance.userId, registered: attendance.registered })
+    .select({
+      userId: attendance.userId,
+      commitmentId: attendance.commitmentId,
+      registered: attendance.registered,
+    })
     .from(attendance)
     .where(eq(attendance.eventId, params.id));
-  const attendanceMap: Record<string, boolean> = Object.fromEntries(
-    attendanceRows.map((r) => [r.userId, r.registered])
-  );
+  const attendanceByUser: Record<string, boolean> = {};
+  const attendanceByCommitment: Record<string, boolean> = {};
+  for (const r of attendanceRows) {
+    if (r.userId) attendanceByUser[r.userId] = r.registered;
+    if (r.commitmentId) attendanceByCommitment[r.commitmentId] = r.registered;
+  }
 
-  return { event: row, slots, participantsBySlot, attendanceMap };
+  // Surface flash message from previous confirm action (email send results)
+  const url = new URL(args.request.url);
+  const confirmFlash = url.searchParams.get("confirmed");
+  let flash: { sent: number; failed: number; failedEmails: string[] } | null = null;
+  if (confirmFlash) {
+    try {
+      flash = JSON.parse(decodeURIComponent(confirmFlash));
+    } catch { /* ignore malformed */ }
+  }
+
+  return { event: row, slots, participantsBySlot, attendanceByUser, attendanceByCommitment, flash };
 }
 
 // ─── Action ───────────────────────────────────────────────────────────────────
@@ -151,13 +168,15 @@ export async function action(args: Route.ActionArgs) {
       return { error: "This slot is already confirmed." };
     }
 
-    // Confirm the slot
+    // Confirm the slot — write registration URL PER-SLOT (B1 fix)
     await db
       .update(timeSlots)
-      .set({ status: "confirmed" })
+      .set({ status: "confirmed", registrationUrl })
       .where(eq(timeSlots.id, slotId));
 
-    // Confirm the event and store registration URL
+    // Bump event status to confirmed. Keep event-level registrationUrl in sync
+    // with the MOST RECENT confirmation (backward compat for any callers still
+    // reading event.registrationUrl). Per-slot URL is now authoritative.
     await db
       .update(events)
       .set({ status: "confirmed", registrationUrl, updatedAt: new Date().toISOString() })
@@ -174,67 +193,85 @@ export async function action(args: Route.ActionArgs) {
     });
     const baseUrl = new URL(request.url).origin;
 
-    try {
-      // Signed-in user emails
-      const signedInEmails = await db
-        .select({ email: users.email })
-        .from(commitments)
-        .innerJoin(users, eq(users.id, commitments.userId))
-        .where(
-          and(
-            eq(commitments.timeSlotId, slotId),
-            isNull(commitments.withdrawnAt)
-          )
-        );
+    // Signed-in user emails
+    const signedInEmails = await db
+      .select({ email: users.email })
+      .from(commitments)
+      .innerJoin(users, eq(users.id, commitments.userId))
+      .where(
+        and(
+          eq(commitments.timeSlotId, slotId),
+          isNull(commitments.withdrawnAt)
+        )
+      );
 
-      // Guest emails
-      const guestEmails = await db
-        .select({ email: commitments.guestEmail })
-        .from(commitments)
-        .where(
-          and(
-            eq(commitments.timeSlotId, slotId),
-            isNull(commitments.withdrawnAt),
-            isNull(commitments.userId),
-          )
-        );
+    // Guest emails
+    const guestEmails = await db
+      .select({ email: commitments.guestEmail })
+      .from(commitments)
+      .where(
+        and(
+          eq(commitments.timeSlotId, slotId),
+          isNull(commitments.withdrawnAt),
+          isNull(commitments.userId),
+        )
+      );
 
-      const allEmails = [
-        ...signedInEmails.map((r) => r.email),
-        ...guestEmails.map((r) => r.email).filter(Boolean),
-      ] as string[];
+    const allEmails = [
+      ...signedInEmails.map((r) => r.email),
+      ...guestEmails.map((r) => r.email).filter(Boolean),
+    ] as string[];
 
-      for (const email of allEmails) {
-        const tpl = eventConfirmedEmail(
-          event.title,
-          params.id,
-          slotDate,
-          registrationUrl,
-          baseUrl
-        );
-        await sendMail(env, { to: email, ...tpl });
+    // B3: parallelize sends. B2: aggregate failures and surface to organizer.
+    const tpl = eventConfirmedEmail(
+      event.title,
+      params.id,
+      slotDate,
+      registrationUrl,
+      baseUrl
+    );
+    const results = await Promise.allSettled(
+      allEmails.map((to) => sendMail(env, { to, ...tpl }))
+    );
+    let sent = 0;
+    const failedEmails: string[] = [];
+    results.forEach((r, i) => {
+      if (r.status === "fulfilled") {
+        sent += 1;
+      } else {
+        console.error("Email send failed:", allEmails[i], r.reason);
+        failedEmails.push(allEmails[i]);
       }
-    } catch (e) {
-      console.error("Email send failed after confirmation:", e);
-    }
-
-    return redirect(`/events/${params.id}/manage`);
+    });
+    const flash = { sent, failed: failedEmails.length, failedEmails };
+    const flashParam = encodeURIComponent(JSON.stringify(flash));
+    return redirect(`/events/${params.id}/manage?confirmed=${flashParam}`);
   }
 
   if (intent === "mark_attendance") {
-    const targetUserId = form.get("userId") as string;
+    const targetUserId = (form.get("userId") as string) || null;
+    const targetCommitmentId = (form.get("commitmentId") as string) || null;
     const registered = form.get("registered") === "true";
-    if (!targetUserId) return { error: "Missing userId." };
+    if (!targetUserId && !targetCommitmentId) {
+      return { error: "Missing userId or commitmentId." };
+    }
 
+    // Look up existing attendance row by whichever key was provided.
+    // userId path = signed-in participants (back-compat)
+    // commitmentId path = guests (B5 unlock)
+    const existingWhere = targetCommitmentId
+      ? and(
+          eq(attendance.commitmentId, targetCommitmentId),
+          eq(attendance.eventId, params.id)
+        )
+      : and(
+          eq(attendance.userId, targetUserId!),
+          eq(attendance.eventId, params.id)
+        );
     const [existing] = await db
       .select({ id: attendance.id })
       .from(attendance)
-      .where(
-        and(
-          eq(attendance.userId, targetUserId),
-          eq(attendance.eventId, params.id)
-        )
-      )
+      .where(existingWhere)
       .limit(1);
 
     if (existing) {
@@ -245,11 +282,17 @@ export async function action(args: Route.ActionArgs) {
     } else {
       await db.insert(attendance).values({
         userId: targetUserId,
+        commitmentId: targetCommitmentId,
         eventId: params.id,
         registered,
         markedAt: new Date().toISOString(),
       });
     }
+    // B6: bump event updatedAt
+    await db
+      .update(events)
+      .set({ updatedAt: new Date().toISOString() })
+      .where(eq(events.id, params.id));
     return { ok: true };
   }
 
@@ -264,15 +307,20 @@ export async function action(args: Route.ActionArgs) {
       .set({ status: "completed", updatedAt: new Date().toISOString() })
       .where(eq(events.id, params.id));
 
-    // Recalculate reputation for all participants who committed to this event
+    // Recalculate reputation for all SIGNED-IN participants who committed.
+    // Guest commits (userId null) are skipped — reputation requires a user row.
     const committedUsers = await db
       .selectDistinct({ userId: commitments.userId })
       .from(commitments)
       .where(
-        and(eq(commitments.eventId, params.id), isNull(commitments.withdrawnAt))
+        and(
+          eq(commitments.eventId, params.id),
+          isNull(commitments.withdrawnAt)
+        )
       );
 
     for (const { userId } of committedUsers) {
+      if (!userId) continue; // skip guest rows
       // Count distinct confirmed/completed events they committed to
       const [committedRow] = await db
         .select({
@@ -359,6 +407,11 @@ export async function action(args: Route.ActionArgs) {
       }
     }
 
+    // B6: bump event updatedAt
+    await db
+      .update(events)
+      .set({ updatedAt: new Date().toISOString() })
+      .where(eq(events.id, params.id));
     return redirect(`/events/${params.id}/manage`);
   }
 
@@ -380,7 +433,7 @@ function fmt(date: string | Date, tz?: string) {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function ManageEvent() {
-  const { event, slots, participantsBySlot, attendanceMap } =
+  const { event, slots, participantsBySlot, attendanceByUser, attendanceByCommitment, flash } =
     useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const attendanceFetcher = useFetcher();
@@ -389,15 +442,18 @@ export default function ManageEvent() {
   const confirmedSlots = slots.filter((s) => s.status === "confirmed");
   const activeSlots = slots.filter((s) => s.status === "active");
 
-  // Optimistic attendance state
-  const optimisticAttendance: Record<string, boolean> = { ...attendanceMap };
+  // Optimistic attendance state — dual-keyed (userId for signed-in, commitmentId for guests)
+  const optimisticByUser: Record<string, boolean> = { ...attendanceByUser };
+  const optimisticByCommitment: Record<string, boolean> = { ...attendanceByCommitment };
   if (
     attendanceFetcher.state !== "idle" &&
     attendanceFetcher.formData?.get("intent") === "mark_attendance"
   ) {
-    const uid = attendanceFetcher.formData.get("userId") as string;
+    const uid = attendanceFetcher.formData.get("userId") as string | null;
+    const cid = attendanceFetcher.formData.get("commitmentId") as string | null;
     const reg = attendanceFetcher.formData.get("registered") === "true";
-    if (uid) optimisticAttendance[uid] = reg;
+    if (uid) optimisticByUser[uid] = reg;
+    if (cid) optimisticByCommitment[cid] = reg;
   }
 
   return (
@@ -433,6 +489,31 @@ export default function ManageEvent() {
 
         {actionData && "error" in actionData && (
           <p className="manage-event__error">{actionData.error}</p>
+        )}
+
+        {/* B2: Flash message — email send results after confirm */}
+        {flash && (
+          <div
+            className={
+              flash.failed > 0
+                ? "manage-event__flash manage-event__flash--warn"
+                : "manage-event__flash manage-event__flash--ok"
+            }
+            role="status"
+          >
+            {flash.failed === 0 ? (
+              <>✅ Confirmed. Emailed all {flash.sent} participant{flash.sent !== 1 ? "s" : ""}.</>
+            ) : (
+              <>
+                ⚠ Confirmed, but {flash.failed} of {flash.sent + flash.failed} email
+                {flash.sent + flash.failed !== 1 ? "s" : ""} failed to send.
+                {flash.failedEmails.length > 0 && (
+                  <> Failed: {flash.failedEmails.join(", ")}</>
+                )}
+                {" "}Check your Resend logs or resend manually.
+              </>
+            )}
+          </div>
         )}
 
         {/* Slots needing confirmation */}
@@ -512,7 +593,7 @@ export default function ManageEvent() {
                           name="registrationUrl"
                           placeholder="https://..."
                           required
-                          defaultValue={event.registrationUrl ?? ""}
+                          defaultValue={slot.registrationUrl ?? event.registrationUrl ?? ""}
                           className="manage-confirm-form__input"
                         />
                       </div>
@@ -558,15 +639,15 @@ export default function ManageEvent() {
                         {slot.commitmentCount} committed
                       </span>
                     </div>
-                    {event.registrationUrl && (
+                    {(slot.registrationUrl ?? event.registrationUrl) && (
                       <p className="manage-slot-card__reg-url">
                         Registration:{" "}
                         <a
-                          href={event.registrationUrl}
+                          href={slot.registrationUrl ?? event.registrationUrl!}
                           target="_blank"
                           rel="noreferrer"
                         >
-                          {event.registrationUrl}
+                          {slot.registrationUrl ?? event.registrationUrl}
                         </a>
                       </p>
                     )}
@@ -577,20 +658,11 @@ export default function ManageEvent() {
                         </p>
                         <ul className="manage-attendance-list">
                           {participants.map((p) => {
-                            // Attendance tracking only works for signed-in users (DB requires userId)
-                            if (p.isGuest) {
-                              return (
-                                <li key={p.commitmentId} className="manage-attendance-item">
-                                  <span className="manage-attendance-btn" title="Guest — attendance tracked by host">—</span>
-                                  <span className="manage-attendance-name">
-                                    {p.name} <span className="manage-participant-badge">guest</span>
-                                    {p.email && <span className="manage-participant-contact" style={{ marginLeft: "0.5rem" }}>{p.email}</span>}
-                                  </span>
-                                </li>
-                              );
-                            }
-                            const checked =
-                              optimisticAttendance[p.userId!] ?? false;
+                            // B5: Attendance toggle works for BOTH signed-in (keyed by userId)
+                            // and guests (keyed by commitmentId).
+                            const checked = p.isGuest
+                              ? (optimisticByCommitment[p.commitmentId] ?? false)
+                              : (optimisticByUser[p.userId!] ?? false);
                             return (
                               <li
                                 key={p.commitmentId}
@@ -605,11 +677,19 @@ export default function ManageEvent() {
                                     name="intent"
                                     value="mark_attendance"
                                   />
-                                  <input
-                                    type="hidden"
-                                    name="userId"
-                                    value={p.userId!}
-                                  />
+                                  {p.isGuest ? (
+                                    <input
+                                      type="hidden"
+                                      name="commitmentId"
+                                      value={p.commitmentId}
+                                    />
+                                  ) : (
+                                    <input
+                                      type="hidden"
+                                      name="userId"
+                                      value={p.userId!}
+                                    />
+                                  )}
                                   <input
                                     type="hidden"
                                     name="registered"
@@ -629,6 +709,7 @@ export default function ManageEvent() {
                                 </attendanceFetcher.Form>
                                 <span className="manage-attendance-name">
                                   {p.name}
+                                  {p.isGuest && <span className="manage-participant-badge">guest</span>}
                                 </span>
                               </li>
                             );
@@ -737,7 +818,7 @@ export default function ManageEvent() {
                           name="registrationUrl"
                           placeholder="https://..."
                           required
-                          defaultValue={event.registrationUrl ?? ""}
+                          defaultValue={slot.registrationUrl ?? event.registrationUrl ?? ""}
                           className="manage-confirm-form__input"
                         />
                       </div>
