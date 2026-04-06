@@ -34,6 +34,8 @@ interface Props {
   eventId: string;
   timezone: string;
   slotOptions: { id: string; startsAt: string }[];
+  /** C4: callback when user clicks "Email selected". Passes selected emails. */
+  onEmailSelected?: (emails: string[]) => void;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -66,12 +68,14 @@ const STATUS_CHIP: Record<string, string> = {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export function RespondentsTable({ respondents, eventId, timezone, slotOptions }: Props) {
+export function RespondentsTable({ respondents, eventId, timezone, slotOptions, onEmailSelected }: Props) {
   const [sortField, setSortField] = useState<SortField>("firstCommitAt");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [search, setSearch] = useState("");
   const [filterSlot, setFilterSlot] = useState<string>("all");
   const [filterType, setFilterType] = useState<"all" | "signed-in" | "guest">("all");
+  // C4: bulk-select
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
 
   function toggleSort(field: SortField) {
     if (sortField === field) {
@@ -139,6 +143,28 @@ export function RespondentsTable({ respondents, eventId, timezone, slotOptions }
     0
   );
 
+  // C4: bulk-select helpers
+  const emailableFiltered = filtered.filter((r) => r.email);
+  const allFilteredSelected = emailableFiltered.length > 0 && emailableFiltered.every((r) => selectedKeys.has(r.key));
+  function toggleSelectAll() {
+    if (allFilteredSelected) {
+      setSelectedKeys(new Set());
+    } else {
+      setSelectedKeys(new Set(emailableFiltered.map((r) => r.key)));
+    }
+  }
+  function toggleSelectOne(key: string) {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+  const selectedEmails = filtered
+    .filter((r) => selectedKeys.has(r.key) && r.email)
+    .map((r) => r.email!);
+
   if (respondents.length === 0) {
     return (
       <div className="respondents-section">
@@ -167,6 +193,15 @@ export function RespondentsTable({ respondents, eventId, timezone, slotOptions }
             </span>
           )}
         </div>
+        {onEmailSelected && selectedEmails.length > 0 && (
+          <button
+            type="button"
+            className="btn btn--primary btn--sm"
+            onClick={() => onEmailSelected(selectedEmails)}
+          >
+            Email {selectedEmails.length} selected
+          </button>
+        )}
         <a
           href={`/events/${eventId}/manage/export`}
           className="btn btn--ghost btn--sm"
@@ -213,6 +248,16 @@ export function RespondentsTable({ respondents, eventId, timezone, slotOptions }
         <table className="respondents-table">
           <thead>
             <tr>
+              {onEmailSelected && (
+                <th className="respondents-th respondents-th--check">
+                  <input
+                    type="checkbox"
+                    checked={allFilteredSelected}
+                    onChange={toggleSelectAll}
+                    title="Select all"
+                  />
+                </th>
+              )}
               <th className="respondents-th respondents-th--sortable" onClick={() => toggleSort("name")}>
                 Name{sortIndicator("name")}
               </th>
@@ -236,7 +281,21 @@ export function RespondentsTable({ respondents, eventId, timezone, slotOptions }
               const maxTier = Math.max(0, ...r.slots.map((s) => s.tierAmount ?? 0));
               const tierLabel = r.slots.find((s) => s.tierLabel)?.tierLabel ?? null;
               return (
-                <tr key={r.key} className="respondents-row">
+                <tr key={r.key} className={`respondents-row${selectedKeys.has(r.key) ? " respondents-row--selected" : ""}`}>
+                  {/* Checkbox */}
+                  {onEmailSelected && (
+                    <td className="respondents-td respondents-td--check">
+                      {r.email ? (
+                        <input
+                          type="checkbox"
+                          checked={selectedKeys.has(r.key)}
+                          onChange={() => toggleSelectOne(r.key)}
+                        />
+                      ) : (
+                        <span title="No email">—</span>
+                      )}
+                    </td>
+                  )}
                   {/* Name + avatar */}
                   <td className="respondents-td respondents-td--name">
                     <div className="respondents-name-cell">

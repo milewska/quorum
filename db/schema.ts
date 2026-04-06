@@ -151,6 +151,26 @@ export const attendance = sqliteTable("attendance", {
   markedAt: text("marked_at"),
 });
 
+// ─── Email Send Log ──────────────────────────────────────────────────────────
+
+export const emailSends = sqliteTable("email_sends", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  eventId: text("event_id")
+    .notNull()
+    .references(() => events.id, { onDelete: "cascade" }),
+  recipientEmail: text("recipient_email").notNull(),
+  subject: text("subject").notNull(),
+  templateName: text("template_name").notNull(),
+  // 'sent' | 'failed'
+  status: text("status").notNull().default("sent"),
+  errorMsg: text("error_msg"),
+  sentAt: text("sent_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+});
+
 // ─── Relations ────────────────────────────────────────────────────────────────
 
 export const usersRelations = relations(users, ({ many }) => ({
@@ -167,6 +187,14 @@ export const eventsRelations = relations(events, ({ one, many }) => ({
   timeSlots: many(timeSlots),
   commitments: many(commitments),
   attendance: many(attendance),
+  emailSends: many(emailSends),
+}));
+
+export const emailSendsRelations = relations(emailSends, ({ one }) => ({
+  event: one(events, {
+    fields: [emailSends.eventId],
+    references: [events.id],
+  }),
 }));
 
 export const timeSlotsRelations = relations(timeSlots, ({ one, many }) => ({

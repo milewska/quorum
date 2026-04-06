@@ -1,12 +1,14 @@
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { useState } from "react";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { Form, redirect, useActionData, useFetcher, useLoaderData } from "react-router";
-import { requireSession } from "~/auth.server";
+import { requireSession, getSession } from "~/auth.server";
 import { formatInTimezone, formatTimeOnly } from "~/components/TimezonePicker";
 import { getEnv } from "~/env.server";
 import { getDb } from "../../db";
-import { attendance, commitments, events, timeSlots, users } from "../../db/schema";
-import { eventConfirmedEmail, sendMail } from "~/email.server";
+import { attendance, commitments, emailSends, events, timeSlots, users } from "../../db/schema";
+import { eventConfirmedEmail, hostUpdateEmail, sendAndLog, sendMail } from "~/email.server";
 import { RespondentsTable } from "~/components/RespondentsTable";
+import { SendUpdateModal } from "~/components/SendUpdateModal";
 import type { Route } from "./+types/events.$id.manage";
 
 // ─── Loader ───────────────────────────────────────────────────────────────────
@@ -226,7 +228,26 @@ export async function loader(args: Route.LoaderArgs) {
     } catch { /* ignore malformed */ }
   }
 
-  return { event: row, slots, participantsBySlot, respondents, attendanceByUser, attendanceByCommitment, flash };
+  // ── C6: Email send log (most recent 50) ──
+  const emailLog = await db
+    .select({
+      id: emailSends.id,
+      recipientEmail: emailSends.recipientEmail,
+      subject: emailSends.subject,
+      templateName: emailSends.templateName,
+      status: emailSends.status,
+      errorMsg: emailSends.errorMsg,
+      sentAt: emailSends.sentAt,
+    })
+    .from(emailSends)
+    .where(eq(emailSends.eventId, params.id))
+    .orderBy(desc(emailSends.sentAt))
+    .limit(50);
+
+  // Host name for Send Update modal
+  const hostName = session.fullName ?? "Event host";
+
+  return { event: row, slots, participantsBySlot, respondents, attendanceByUser, attendanceByCommitment, flash, emailLog, hostName };
 }
 
 // ─── Action ───────────────────────────────────────────────────────────────────
@@ -250,6 +271,7 @@ export async function action(args: Route.ActionArgs) {
   const intent = form.get("intent") as string;
   const slotId = form.get("slotId") as string;
   const registrationUrl = (form.get("registrationUrl") as string)?.trim();
+  const hostMessage = (form.get("hostMessage") as string) || null; // C2
 
   if (intent === "confirm") {
     if (!slotId) return { error: "Missing slot." };
@@ -327,24 +349,26 @@ export async function action(args: Route.ActionArgs) {
       ...guestEmails.map((r) => r.email).filter(Boolean),
     ] as string[];
 
-    // B3: parallelize sends. B2: aggregate failures and surface to organizer.
+    // C2: pass hostMessage to template. C6: sendAndLog for audit trail.
     const tpl = eventConfirmedEmail(
       event.title,
       params.id,
       slotDate,
       registrationUrl,
-      baseUrl
+      baseUrl,
+      hostMessage
     );
     const results = await Promise.allSettled(
-      allEmails.map((to) => sendMail(env, { to, ...tpl }))
+      allEmails.map((to) =>
+        sendAndLog(env, db, params.id, "event_confirmed", { to, ...tpl })
+      )
     );
     let sent = 0;
     const failedEmails: string[] = [];
     results.forEach((r, i) => {
-      if (r.status === "fulfilled") {
+      if (r.status === "fulfilled" && r.value.status === "sent") {
         sent += 1;
       } else {
-        console.error("Email send failed:", allEmails[i], r.reason);
         failedEmails.push(allEmails[i]);
       }
     });
@@ -520,6 +544,53 @@ export async function action(args: Route.ActionArgs) {
     return redirect(`/events/${params.id}/manage`);
   }
 
+  // ── C3: Send Update (ad-hoc email to selected participants) ────────────
+  if (intent === "send_update") {
+    const recipientEmails = ((form.get("recipientEmails") as string) ?? "")
+      .split(",")
+      .map((e) => e.trim())
+      .filter(Boolean);
+    const updateSubject = ((form.get("subject") as string) ?? "").trim();
+    const updateBody = ((form.get("body") as string) ?? "").trim();
+
+    if (recipientEmails.length === 0) return { error: "No recipients selected." };
+    if (!updateSubject) return { error: "Subject is required." };
+    if (!updateBody) return { error: "Message body is required." };
+
+    // Get host name
+    const hostUser = await db
+      .select({ fullName: users.fullName })
+      .from(users)
+      .where(eq(users.id, session.id))
+      .limit(1);
+    const hostName = hostUser[0]?.fullName ?? "Event host";
+    const baseUrl = new URL(request.url).origin;
+
+    const tpl = hostUpdateEmail(
+      event.title,
+      params.id,
+      updateSubject,
+      updateBody,
+      hostName,
+      baseUrl
+    );
+
+    const results = await Promise.allSettled(
+      recipientEmails.map((to) =>
+        sendAndLog(env, db, params.id, "host_update", { to, ...tpl })
+      )
+    );
+
+    let sent = 0;
+    let failed = 0;
+    for (const r of results) {
+      if (r.status === "fulfilled" && r.value.status === "sent") sent++;
+      else failed++;
+    }
+
+    return { sent, failed };
+  }
+
   return { error: "Unknown action." };
 }
 
@@ -538,10 +609,24 @@ function fmt(date: string | Date, tz?: string) {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function ManageEvent() {
-  const { event, slots, participantsBySlot, respondents, attendanceByUser, attendanceByCommitment, flash } =
+  const { event, slots, participantsBySlot, respondents, attendanceByUser, attendanceByCommitment, flash, emailLog, hostName } =
     useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const attendanceFetcher = useFetcher();
+
+  // C3/C4: Send Update modal state
+  const [showSendModal, setShowSendModal] = useState(false);
+  const [preSelectedEmails, setPreSelectedEmails] = useState<string[] | undefined>(undefined);
+
+  // All recipients with emails (for modal)
+  const allRecipients = respondents
+    .filter((r: any) => r.email)
+    .map((r: any) => ({ email: r.email as string, name: r.name as string }));
+
+  function openSendModal(preSelected?: string[]) {
+    setPreSelectedEmails(preSelected);
+    setShowSendModal(true);
+  }
 
   const quorumSlots = slots.filter((s) => s.status === "quorum_reached");
   const confirmedSlots = slots.filter((s) => s.status === "confirmed");
@@ -589,6 +674,15 @@ export default function ManageEvent() {
             >
               Edit event
             </a>
+            {allRecipients.length > 0 && (
+              <button
+                type="button"
+                className="btn btn--primary btn--sm"
+                onClick={() => openSendModal()}
+              >
+                Send Update
+              </button>
+            )}
           </div>
         </div>
 
@@ -627,6 +721,7 @@ export default function ManageEvent() {
           eventId={event.id}
           timezone={event.timezone}
           slotOptions={slots.map((s) => ({ id: s.id, startsAt: s.startsAt }))}
+          onEmailSelected={(emails) => openSendModal(emails)}
         />
 
         {/* Slots needing confirmation */}
@@ -708,6 +803,18 @@ export default function ManageEvent() {
                           required
                           defaultValue={slot.registrationUrl ?? event.registrationUrl ?? ""}
                           className="manage-confirm-form__input"
+                        />
+                      </div>
+                      <div className="manage-confirm-form__field">
+                        <label htmlFor={`msg-${slot.id}`} className="manage-confirm-form__label">
+                          Note to participants (optional)
+                        </label>
+                        <textarea
+                          id={`msg-${slot.id}`}
+                          name="hostMessage"
+                          className="manage-confirm-form__input"
+                          rows={2}
+                          placeholder="e.g. Parking is available at the back entrance..."
                         />
                       </div>
                       <button type="submit" className="btn btn--primary">
@@ -952,7 +1059,63 @@ export default function ManageEvent() {
         {slots.length === 0 && (
           <p className="manage-event__empty">No time slots have been added to this event.</p>
         )}
+
+        {/* ═══ C6: Email Send Log ═══ */}
+        {emailLog.length > 0 && (
+          <div className="manage-section">
+            <h2 className="manage-section__title">
+              Communication Log ({emailLog.length})
+            </h2>
+            <div className="email-log-wrap">
+              <table className="email-log-table">
+                <thead>
+                  <tr>
+                    <th className="email-log-th">Recipient</th>
+                    <th className="email-log-th">Subject</th>
+                    <th className="email-log-th">Type</th>
+                    <th className="email-log-th">Status</th>
+                    <th className="email-log-th">Sent</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {emailLog.map((row: any) => (
+                    <tr key={row.id} className="email-log-row">
+                      <td className="email-log-td">{row.recipientEmail}</td>
+                      <td className="email-log-td email-log-td--subject">{row.subject}</td>
+                      <td className="email-log-td">
+                        <span className="email-log-type">{row.templateName.replace(/_/g, " ")}</span>
+                      </td>
+                      <td className="email-log-td">
+                        <span className={`email-log-status email-log-status--${row.status}`}>
+                          {row.status === "sent" ? "Sent" : "Failed"}
+                        </span>
+                        {row.errorMsg && (
+                          <span className="email-log-error" title={row.errorMsg}>!</span>
+                        )}
+                      </td>
+                      <td className="email-log-td email-log-td--date">
+                        {new Date(row.sentAt).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* C3/C4: Send Update Modal */}
+      {showSendModal && (
+        <SendUpdateModal
+          eventId={event.id}
+          eventTitle={event.title}
+          allRecipients={allRecipients}
+          preSelected={preSelectedEmails}
+          hostName={hostName}
+          onClose={() => setShowSendModal(false)}
+        />
+      )}
     </section>
   );
 }
