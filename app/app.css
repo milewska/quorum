@@ -2831,3 +2831,113 @@ ing (manage page) ───�
   line-height: 16px; text-align: center; border-radius: 50%;
   background: #fee2e2; color: #991b1b; font-size: 0.6875rem; font-weight: 700; cursor: help;
 }
+
+/* ═══ Phase D+E — Tabs, Visual Polish, Mobile ═══ */
+
+/* ── Tab bar ── */
+.manage-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid var(--color-border);
+  margin-bottom: 1.25rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.manage-tab {
+  padding: 0.6rem 1.25rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-muted);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
+}
+.manage-tab:hover {
+  color: var(--color-text);
+}
+.manage-tab--active {
+  color: #0d9488;
+  border-bottom-color: #0d9488;
+}
+
+/* ── Section header with inline action ── */
+.manage-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+/* ── Slot card visual polish ── */
+.manage-slot-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  transition: box-shadow 0.15s;
+}
+.manage-slot-card:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+.manage-slot-card--quorum {
+  border-left: 3px solid #f59e0b;
+}
+.manage-slot-card--confirmed {
+  border-left: 3px solid #16a34a;
+}
+
+/* ── Mobile responsive ── */
+@media (max-width: 768px) {
+  .manage-tabs {
+    gap: 0;
+  }
+  .manage-tab {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8125rem;
+  }
+  .manage-event__header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+  .manage-event__header-actions {
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+  .respondents-table-wrap {
+    margin: 0 -1rem;
+    padding: 0 1rem;
+  }
+  .respondents-controls {
+    flex-direction: column;
+  }
+  .respondents-search,
+  .respondents-filter {
+    width: 100%;
+  }
+  .manage-slot-card {
+    padding: 0.75rem;
+  }
+  .manage-confirm-form__field {
+    flex-direction: column;
+  }
+  .modal {
+    max-width: 100%;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+  .send-update-recipients {
+    max-height: 100px;
+  }
+  .email-log-table {
+    font-size: 0.75rem;
+  }
+  .email-log-td {
+    padding: 0.3rem 0.4rem;
+  }
+}

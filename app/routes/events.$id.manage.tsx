@@ -218,13 +218,22 @@ export async function loader(args: Route.LoaderArgs) {
     if (r.commitmentId) attendanceByCommitment[r.commitmentId] = r.registered;
   }
 
-  // Surface flash message from previous confirm action (email send results)
+  // Surface flash messages from previous actions
   const url = new URL(args.request.url);
   const confirmFlash = url.searchParams.get("confirmed");
   let flash: { sent: number; failed: number; failedEmails: string[] } | null = null;
   if (confirmFlash) {
     try {
       flash = JSON.parse(decodeURIComponent(confirmFlash));
+    } catch { /* ignore malformed */ }
+  }
+
+  // D3: undo-remove flash
+  const removedFlash = url.searchParams.get("removed");
+  let removedInfo: { commitmentId: string; name: string; slotId: string } | null = null;
+  if (removedFlash) {
+    try {
+      removedInfo = JSON.parse(decodeURIComponent(removedFlash));
     } catch { /* ignore malformed */ }
   }
 
@@ -247,7 +256,7 @@ export async function loader(args: Route.LoaderArgs) {
   // Host name for Send Update modal
   const hostName = session.fullName ?? "Event host";
 
-  return { event: row, slots, participantsBySlot, respondents, attendanceByUser, attendanceByCommitment, flash, emailLog, hostName };
+  return { event: row, slots, participantsBySlot, respondents, attendanceByUser, attendanceByCommitment, flash, removedInfo, emailLog, hostName };
 }
 
 // ─── Action ───────────────────────────────────────────────────────────────────
@@ -541,6 +550,45 @@ export async function action(args: Route.ActionArgs) {
       .update(events)
       .set({ updatedAt: new Date().toISOString() })
       .where(eq(events.id, params.id));
+
+    // D3: pass removed commitmentId + name in flash for undo toast
+    const removedName = (form.get("participantName") as string) ?? "Participant";
+    const removeFlash = encodeURIComponent(
+      JSON.stringify({ commitmentId: commitment.id, name: removedName, slotId: commitment.timeSlotId })
+    );
+    return redirect(`/events/${params.id}/manage?removed=${removeFlash}`);
+  }
+
+  // ── D3: Undo remove — reactivate a soft-deleted commitment ────────────
+  if (intent === "undo_remove") {
+    const commitmentId = form.get("commitmentId") as string;
+    const undoSlotId = form.get("slotId") as string;
+    if (!commitmentId) return { error: "Missing commitment." };
+
+    // Reactivate the commitment (set withdrawnAt back to null)
+    await db
+      .update(commitments)
+      .set({ withdrawnAt: null })
+      .where(
+        and(
+          eq(commitments.id, commitmentId),
+          eq(commitments.eventId, params.id)
+        )
+      );
+
+    // Re-increment the slot counter
+    if (undoSlotId) {
+      await db
+        .update(timeSlots)
+        .set({ commitmentCount: sql`${timeSlots.commitmentCount} + 1` })
+        .where(eq(timeSlots.id, undoSlotId));
+    }
+
+    await db
+      .update(events)
+      .set({ updatedAt: new Date().toISOString() })
+      .where(eq(events.id, params.id));
+
     return redirect(`/events/${params.id}/manage`);
   }
 
@@ -609,10 +657,14 @@ function fmt(date: string | Date, tz?: string) {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function ManageEvent() {
-  const { event, slots, participantsBySlot, respondents, attendanceByUser, attendanceByCommitment, flash, emailLog, hostName } =
+  const { event, slots, participantsBySlot, respondents, attendanceByUser, attendanceByCommitment, flash, removedInfo, emailLog, hostName } =
     useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const attendanceFetcher = useFetcher();
+
+  // E1: Tab state
+  type Tab = "respondents" | "slots" | "attendance" | "communication";
+  const [activeTab, setActiveTab] = useState<Tab>("respondents");
 
   // C3/C4: Send Update modal state
   const [showSendModal, setShowSendModal] = useState(false);
@@ -715,7 +767,45 @@ export default function ManageEvent() {
           </div>
         )}
 
-        {/* ═══ Unified Respondents Table (Phase B) ═══ */}
+        {/* D3: Undo-remove toast */}
+        {removedInfo && (
+          <div className="manage-event__flash manage-event__flash--warn" role="status">
+            Removed <strong>{removedInfo.name}</strong>.{" "}
+            <Form method="post" style={{ display: "inline" }}>
+              <input type="hidden" name="intent" value="undo_remove" />
+              <input type="hidden" name="commitmentId" value={removedInfo.commitmentId} />
+              <input type="hidden" name="slotId" value={removedInfo.slotId} />
+              <button type="submit" className="btn btn--ghost btn--xs" style={{ textDecoration: "underline" }}>
+                Undo
+              </button>
+            </Form>
+          </div>
+        )}
+
+        {/* ═══ E1: Tab Bar ═══ */}
+        <div className="manage-tabs">
+          {(["respondents", "slots", "attendance", "communication"] as Tab[]).map((tab) => {
+            const labels: Record<Tab, string> = {
+              respondents: `Respondents (${respondents.length})`,
+              slots: `Slots (${slots.length})`,
+              attendance: "Attendance",
+              communication: `Comms (${emailLog.length})`,
+            };
+            return (
+              <button
+                key={tab}
+                type="button"
+                className={`manage-tab${activeTab === tab ? " manage-tab--active" : ""}`}
+                onClick={() => setActiveTab(tab)}
+              >
+                {labels[tab]}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* ═══ TAB: Respondents ═══ */}
+        {activeTab === "respondents" && (
         <RespondentsTable
           respondents={respondents}
           eventId={event.id}
@@ -723,7 +813,10 @@ export default function ManageEvent() {
           slotOptions={slots.map((s) => ({ id: s.id, startsAt: s.startsAt }))}
           onEmailSelected={(emails) => openSendModal(emails)}
         />
+        )}
 
+        {/* ═══ TAB: Slots (quorum + active + confirm forms) ═══ */}
+        {activeTab === "slots" && (<>
         {/* Slots needing confirmation */}
         {quorumSlots.length > 0 && (
           <div className="manage-section">
@@ -765,6 +858,7 @@ export default function ManageEvent() {
                             }}>
                               <input type="hidden" name="intent" value="remove_participant" />
                               <input type="hidden" name="commitmentId" value={p.commitmentId} />
+                              <input type="hidden" name="participantName" value={p.name} />
                               <button type="submit" className="btn btn--ghost btn--xs manage-participant-remove">Remove</button>
                             </Form>
                           </li>
@@ -831,7 +925,84 @@ export default function ManageEvent() {
           </div>
         )}
 
-        {/* Already confirmed slots */}
+        {/* Active slots — host can confirm ANY slot, not just quorum-reached */}
+        {activeSlots.length > 0 && (
+          <div className="manage-section">
+            <h2 className="manage-section__title">
+              ⏳ Gathering commitments ({activeSlots.length})
+            </h2>
+            <p className="manage-section__desc">
+              You can confirm any slot — quorum is a minimum, not a requirement to proceed.
+            </p>
+            <ul className="manage-slot-list">
+              {activeSlots.map((slot) => {
+                const participants = participantsBySlot[slot.id] ?? [];
+                return (
+                  <li key={slot.id} className="manage-slot-card">
+                    <div className="manage-slot-card__time">
+                      <strong>{fmt(slot.startsAt, event.timezone)}</strong>
+                      <span className="manage-slot-card__dash">&ndash;</span>
+                      <span>
+                        {formatTimeOnly(slot.endsAt, event.timezone)}
+                      </span>
+                      <span className="badge badge--active">
+                        {slot.commitmentCount} / {event.threshold} committed
+                      </span>
+                    </div>
+                    {participants.length > 0 && (
+                      <ul className="manage-participant-list">
+                        {participants.map((p) => (
+                          <li key={p.commitmentId} className="manage-participant-item">
+                            <span className="manage-participant-name">
+                              {p.name}
+                              {p.isGuest && <span className="manage-participant-badge">guest</span>}
+                            </span>
+                            {p.email && <span className="manage-participant-contact">{p.email}</span>}
+                            {p.isGuest && p.phone && <span className="manage-participant-contact">{p.phone}</span>}
+                            <Form method="post" style={{ display: "inline" }} onSubmit={(e) => {
+                              if (!window.confirm(`Remove ${p.name} from this slot?`)) e.preventDefault();
+                            }}>
+                              <input type="hidden" name="intent" value="remove_participant" />
+                              <input type="hidden" name="commitmentId" value={p.commitmentId} />
+                              <input type="hidden" name="participantName" value={p.name} />
+                              <button type="submit" className="btn btn--ghost btn--xs manage-participant-remove">Remove</button>
+                            </Form>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <Form method="post" className="manage-confirm-form" onSubmit={(e) => {
+                      const count = participants.length;
+                      if (!window.confirm(`Confirm this slot and email ${count} participant${count !== 1 ? "s" : ""}?`)) e.preventDefault();
+                    }}>
+                      <input type="hidden" name="intent" value="confirm" />
+                      <input type="hidden" name="slotId" value={slot.id} />
+                      <div className="manage-confirm-form__field">
+                        <label htmlFor={`reg-active-${slot.id}`} className="manage-confirm-form__label">Registration URL</label>
+                        <input id={`reg-active-${slot.id}`} type="url" name="registrationUrl" placeholder="https://..." required defaultValue={slot.registrationUrl ?? event.registrationUrl ?? ""} className="manage-confirm-form__input" />
+                      </div>
+                      <div className="manage-confirm-form__field">
+                        <label htmlFor={`msg-active-${slot.id}`} className="manage-confirm-form__label">Note to participants (optional)</label>
+                        <textarea id={`msg-active-${slot.id}`} name="hostMessage" className="manage-confirm-form__input" rows={2} placeholder="e.g. Parking is available at the back entrance..." />
+                      </div>
+                      <button type="submit" className="btn btn--primary btn--sm">Confirm this date</button>
+                      <p className="manage-confirm-form__hint">This will email all committed participants with the registration link.</p>
+                    </Form>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+
+        {slots.length === 0 && (
+          <p className="manage-event__empty">No time slots have been added to this event.</p>
+        )}
+        </>)}
+
+        {/* ═══ TAB: Attendance ═══ */}
+        {activeTab === "attendance" && (<>
+        {/* Confirmed slots — attendance tracking */}
         {confirmedSlots.length > 0 && (
           <div className="manage-section">
             <h2 className="manage-section__title">
@@ -963,146 +1134,72 @@ export default function ManageEvent() {
           </div>
         )}
 
-        {/* Active slots — host can confirm ANY slot, not just quorum-reached */}
-        {activeSlots.length > 0 && (
-          <div className="manage-section">
-            <h2 className="manage-section__title">
-              ⏳ Gathering commitments ({activeSlots.length})
-            </h2>
-            <p className="manage-section__desc">
-              You can confirm any slot — quorum is a minimum, not a requirement to proceed.
-            </p>
-            <ul className="manage-slot-list">
-              {activeSlots.map((slot) => {
-                const participants = participantsBySlot[slot.id] ?? [];
-                return (
-                  <li key={slot.id} className="manage-slot-card">
-                    <div className="manage-slot-card__time">
-                      <strong>{fmt(slot.startsAt, event.timezone)}</strong>
-                      <span className="manage-slot-card__dash">&ndash;</span>
-                      <span>
-                        {formatTimeOnly(slot.endsAt, event.timezone)}
-                      </span>
-                      <span className="badge badge--active">
-                        {slot.commitmentCount} / {event.threshold} committed
-                      </span>
-                    </div>
-                    {participants.length > 0 && (
-                      <ul className="manage-participant-list">
-                        {participants.map((p) => (
-                          <li key={p.commitmentId} className="manage-participant-item">
-                            <span className="manage-participant-name">
-                              {p.name}
-                              {p.isGuest && <span className="manage-participant-badge">guest</span>}
-                            </span>
-                            {p.email && <span className="manage-participant-contact">{p.email}</span>}
-                            {p.isGuest && p.phone && <span className="manage-participant-contact">{p.phone}</span>}
-                            <Form method="post" style={{ display: "inline" }} onSubmit={(e) => {
-                              if (!window.confirm(`Remove ${p.name} from this slot?`)) e.preventDefault();
-                            }}>
-                              <input type="hidden" name="intent" value="remove_participant" />
-                              <input type="hidden" name="commitmentId" value={p.commitmentId} />
-                              <button type="submit" className="btn btn--ghost btn--xs manage-participant-remove">Remove</button>
-                            </Form>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-
-                    <Form
-                      method="post"
-                      className="manage-confirm-form"
-                      onSubmit={(e) => {
-                        const count = participants.length;
-                        if (
-                          !window.confirm(
-                            `Confirm this slot and email ${count} participant${count !== 1 ? "s" : ""}? This will notify everyone who committed.`
-                          )
-                        ) {
-                          e.preventDefault();
-                        }
-                      }}
-                    >
-                      <input type="hidden" name="intent" value="confirm" />
-                      <input type="hidden" name="slotId" value={slot.id} />
-                      <div className="manage-confirm-form__field">
-                        <label
-                          htmlFor={`reg-active-${slot.id}`}
-                          className="manage-confirm-form__label"
-                        >
-                          Registration URL
-                        </label>
-                        <input
-                          id={`reg-active-${slot.id}`}
-                          type="url"
-                          name="registrationUrl"
-                          placeholder="https://..."
-                          required
-                          defaultValue={slot.registrationUrl ?? event.registrationUrl ?? ""}
-                          className="manage-confirm-form__input"
-                        />
-                      </div>
-                      <button type="submit" className="btn btn--primary btn--sm">
-                        Confirm this date
-                      </button>
-                      <p className="manage-confirm-form__hint">
-                        This will email all committed participants with the registration link.
-                      </p>
-                    </Form>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
+        {confirmedSlots.length === 0 && event.status !== "completed" && (
+          <p className="manage-section__desc">No confirmed slots yet. Confirm slots from the Slots tab to track attendance.</p>
         )}
-
-        {slots.length === 0 && (
-          <p className="manage-event__empty">No time slots have been added to this event.</p>
+        {event.status === "completed" && (
+          <p className="manage-complete-done">
+            🎊 Event completed — reputation scores have been updated.
+          </p>
         )}
+        </>)}
 
-        {/* ═══ C6: Email Send Log ═══ */}
-        {emailLog.length > 0 && (
+        {/* ═══ TAB: Communication ═══ */}
+        {activeTab === "communication" && (<>
           <div className="manage-section">
-            <h2 className="manage-section__title">
-              Communication Log ({emailLog.length})
-            </h2>
-            <div className="email-log-wrap">
-              <table className="email-log-table">
-                <thead>
-                  <tr>
-                    <th className="email-log-th">Recipient</th>
-                    <th className="email-log-th">Subject</th>
-                    <th className="email-log-th">Type</th>
-                    <th className="email-log-th">Status</th>
-                    <th className="email-log-th">Sent</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {emailLog.map((row: any) => (
-                    <tr key={row.id} className="email-log-row">
-                      <td className="email-log-td">{row.recipientEmail}</td>
-                      <td className="email-log-td email-log-td--subject">{row.subject}</td>
-                      <td className="email-log-td">
-                        <span className="email-log-type">{row.templateName.replace(/_/g, " ")}</span>
-                      </td>
-                      <td className="email-log-td">
-                        <span className={`email-log-status email-log-status--${row.status}`}>
-                          {row.status === "sent" ? "Sent" : "Failed"}
-                        </span>
-                        {row.errorMsg && (
-                          <span className="email-log-error" title={row.errorMsg}>!</span>
-                        )}
-                      </td>
-                      <td className="email-log-td email-log-td--date">
-                        {new Date(row.sentAt).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="manage-section__header">
+              <h2 className="manage-section__title">Communication</h2>
+              {allRecipients.length > 0 && (
+                <button type="button" className="btn btn--primary btn--sm" onClick={() => openSendModal()}>
+                  Send Update
+                </button>
+              )}
             </div>
+            <p className="manage-section__desc">
+              Send messages to committed participants and view your email history.
+            </p>
+
+            {emailLog.length > 0 ? (
+              <div className="email-log-wrap">
+                <table className="email-log-table">
+                  <thead>
+                    <tr>
+                      <th className="email-log-th">Recipient</th>
+                      <th className="email-log-th">Subject</th>
+                      <th className="email-log-th">Type</th>
+                      <th className="email-log-th">Status</th>
+                      <th className="email-log-th">Sent</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {emailLog.map((row: any) => (
+                      <tr key={row.id} className="email-log-row">
+                        <td className="email-log-td">{row.recipientEmail}</td>
+                        <td className="email-log-td email-log-td--subject">{row.subject}</td>
+                        <td className="email-log-td">
+                          <span className="email-log-type">{row.templateName.replace(/_/g, " ")}</span>
+                        </td>
+                        <td className="email-log-td">
+                          <span className={`email-log-status email-log-status--${row.status}`}>
+                            {row.status === "sent" ? "Sent" : "Failed"}
+                          </span>
+                          {row.errorMsg && (
+                            <span className="email-log-error" title={row.errorMsg}>!</span>
+                          )}
+                        </td>
+                        <td className="email-log-td email-log-td--date">
+                          {new Date(row.sentAt).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="respondents-section__empty">No emails sent yet.</p>
+            )}
           </div>
-        )}
+        </>)}
       </div>
 
       {/* C3/C4: Send Update Modal */}
