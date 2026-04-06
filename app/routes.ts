@@ -14,6 +14,7 @@ export default [
   route("events/:id", "routes/events.$id.tsx"),
   route("events/:id/edit", "routes/events.$id.edit.tsx"),
   route("events/:id/manage", "routes/events.$id.manage.tsx"),
+  route("events/:id/manage/export", "routes/events.$id.manage.export.tsx"),
 
   // User profiles
   route("users/:id", "routes/users.$id.tsx"),

@@ -6,6 +6,7 @@ import { getEnv } from "~/env.server";
 import { getDb } from "../../db";
 import { attendance, commitments, events, timeSlots, users } from "../../db/schema";
 import { eventConfirmedEmail, sendMail } from "~/email.server";
+import { RespondentsTable } from "~/components/RespondentsTable";
 import type { Route } from "./+types/events.$id.manage";
 
 // ─── Loader ───────────────────────────────────────────────────────────────────
@@ -36,7 +37,8 @@ export async function loader(args: Route.LoaderArgs) {
     .where(eq(timeSlots.eventId, params.id))
     .orderBy(timeSlots.startsAt);
 
-  // Load committed participants per slot — signed-in users
+  // Load committed participants — enriched for respondent table (Phase B)
+  // Signed-in users: includes avatar, reputation, tier, commit timestamp
   const signedInRows = await db
     .select({
       commitmentId: commitments.id,
@@ -44,6 +46,11 @@ export async function loader(args: Route.LoaderArgs) {
       userId: users.id,
       name: users.fullName,
       email: users.email,
+      avatarUrl: users.avatarUrl,
+      reputationScore: users.reputationScore,
+      tierLabel: commitments.tierLabel,
+      tierAmount: commitments.tierAmount,
+      createdAt: commitments.createdAt,
     })
     .from(commitments)
     .innerJoin(users, eq(users.id, commitments.userId))
@@ -52,7 +59,7 @@ export async function loader(args: Route.LoaderArgs) {
     )
     .orderBy(commitments.createdAt);
 
-  // Load guest participants (userId is null)
+  // Guest participants (userId is null)
   const guestRows = await db
     .select({
       commitmentId: commitments.id,
@@ -60,6 +67,9 @@ export async function loader(args: Route.LoaderArgs) {
       name: commitments.guestName,
       email: commitments.guestEmail,
       phone: commitments.guestPhone,
+      tierLabel: commitments.tierLabel,
+      tierAmount: commitments.tierAmount,
+      createdAt: commitments.createdAt,
     })
     .from(commitments)
     .where(
@@ -71,6 +81,7 @@ export async function loader(args: Route.LoaderArgs) {
     )
     .orderBy(commitments.createdAt);
 
+  // ── Per-slot participant map (kept for slot confirm/attendance sections) ──
   const participantsBySlot: Record<
     string,
     { commitmentId: string; userId: string | null; name: string; email: string | null; phone?: string | null; isGuest: boolean }[]
@@ -94,6 +105,100 @@ export async function loader(args: Route.LoaderArgs) {
       isGuest: true,
     });
   }
+
+  // ── Person-centric respondent list (Phase B: unified table) ──
+  // Group by userId (signed-in) or by commitmentId cluster for guests
+  type SlotInfo = {
+    slotId: string;
+    commitmentId: string;
+    startsAt: string;
+    tierLabel: string | null;
+    tierAmount: number | null;
+    createdAt: string;
+    slotStatus: string;
+  };
+  type Respondent = {
+    key: string;
+    name: string;
+    email: string | null;
+    phone: string | null;
+    avatarUrl: string | null;
+    reputationScore: number | null;
+    isGuest: boolean;
+    userId: string | null;
+    slots: SlotInfo[];
+    firstCommitAt: string;
+  };
+
+  const slotMap = new Map(slots.map((s) => [s.id, s]));
+  const respondentMap = new Map<string, Respondent>();
+
+  for (const p of signedInRows) {
+    const slot = slotMap.get(p.slotId);
+    const key = p.userId;
+    const existing = respondentMap.get(key);
+    const slotInfo: SlotInfo = {
+      slotId: p.slotId,
+      commitmentId: p.commitmentId,
+      startsAt: slot?.startsAt ?? "",
+      tierLabel: p.tierLabel,
+      tierAmount: p.tierAmount,
+      createdAt: p.createdAt,
+      slotStatus: slot?.status ?? "active",
+    };
+    if (existing) {
+      existing.slots.push(slotInfo);
+      if (p.createdAt < existing.firstCommitAt) existing.firstCommitAt = p.createdAt;
+    } else {
+      respondentMap.set(key, {
+        key,
+        name: p.name,
+        email: p.email,
+        phone: null,
+        avatarUrl: p.avatarUrl,
+        reputationScore: p.reputationScore,
+        isGuest: false,
+        userId: p.userId,
+        slots: [slotInfo],
+        firstCommitAt: p.createdAt,
+      });
+    }
+  }
+
+  for (const p of guestRows) {
+    const slot = slotMap.get(p.slotId);
+    // Group guests by email when available, otherwise per-commitment
+    const key = p.email ? `guest:${p.email}` : `guest-c:${p.commitmentId}`;
+    const existing = respondentMap.get(key);
+    const slotInfo: SlotInfo = {
+      slotId: p.slotId,
+      commitmentId: p.commitmentId,
+      startsAt: slot?.startsAt ?? "",
+      tierLabel: p.tierLabel,
+      tierAmount: p.tierAmount,
+      createdAt: p.createdAt,
+      slotStatus: slot?.status ?? "active",
+    };
+    if (existing) {
+      existing.slots.push(slotInfo);
+      if (p.createdAt < existing.firstCommitAt) existing.firstCommitAt = p.createdAt;
+    } else {
+      respondentMap.set(key, {
+        key,
+        name: p.name ?? "Guest",
+        email: p.email,
+        phone: p.phone,
+        avatarUrl: null,
+        reputationScore: null,
+        isGuest: true,
+        userId: null,
+        slots: [slotInfo],
+        firstCommitAt: p.createdAt,
+      });
+    }
+  }
+
+  const respondents = Array.from(respondentMap.values());
 
   // Attendance records for this event — dual-keyed (userId for signed-in, commitmentId for guests)
   const attendanceRows = await db
@@ -121,7 +226,7 @@ export async function loader(args: Route.LoaderArgs) {
     } catch { /* ignore malformed */ }
   }
 
-  return { event: row, slots, participantsBySlot, attendanceByUser, attendanceByCommitment, flash };
+  return { event: row, slots, participantsBySlot, respondents, attendanceByUser, attendanceByCommitment, flash };
 }
 
 // ─── Action ───────────────────────────────────────────────────────────────────
@@ -433,7 +538,7 @@ function fmt(date: string | Date, tz?: string) {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function ManageEvent() {
-  const { event, slots, participantsBySlot, attendanceByUser, attendanceByCommitment, flash } =
+  const { event, slots, participantsBySlot, respondents, attendanceByUser, attendanceByCommitment, flash } =
     useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const attendanceFetcher = useFetcher();
@@ -515,6 +620,14 @@ export default function ManageEvent() {
             )}
           </div>
         )}
+
+        {/* ═══ Unified Respondents Table (Phase B) ═══ */}
+        <RespondentsTable
+          respondents={respondents}
+          eventId={event.id}
+          timezone={event.timezone}
+          slotOptions={slots.map((s) => ({ id: s.id, startsAt: s.startsAt }))}
+        />
 
         {/* Slots needing confirmation */}
         {quorumSlots.length > 0 && (
