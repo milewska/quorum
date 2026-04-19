@@ -474,19 +474,24 @@ export async function action(args: Route.ActionArgs) {
           )
         );
 
-      // Count events they registered for
+      // Count distinct confirmed/completed events they actually registered for
       const [registeredRow] = await db
-        .select({ count: sql<number>`count(*)` })
+        .select({ count: sql<number>`count(distinct ${attendance.eventId})` })
         .from(attendance)
+        .innerJoin(events, eq(events.id, attendance.eventId))
         .where(
-          and(eq(attendance.userId, userId), eq(attendance.registered, true))
+          and(
+            eq(attendance.userId, userId),
+            eq(attendance.registered, true),
+            inArray(events.status, ["confirmed", "completed"])
+          )
         );
 
       const committedToConfirmed = Number(committedRow?.count ?? 0);
       const registeredCount = Number(registeredRow?.count ?? 0);
       const newScore =
         committedToConfirmed > 0
-          ? Math.round((registeredCount / committedToConfirmed) * 100)
+          ? Math.min(100, Math.round((registeredCount / committedToConfirmed) * 100))
           : 100;
 
       await db
@@ -496,6 +501,49 @@ export async function action(args: Route.ActionArgs) {
     }
 
     return redirect(`/events/${params.id}/manage`);
+  }
+
+  // ── Mark all participants in a slot as registered / unregistered ──────────
+  if (intent === "mark_all_attendance") {
+    const slotId = form.get("slotId") as string;
+    const registered = form.get("registered") === "true";
+    if (!slotId) return { error: "Missing slotId." };
+
+    // Get all active commitments for this slot
+    const slotCommitments = await db
+      .select({
+        id: commitments.id,
+        userId: commitments.userId,
+      })
+      .from(commitments)
+      .where(
+        and(
+          eq(commitments.timeSlotId, slotId),
+          eq(commitments.eventId, params.id),
+          isNull(commitments.withdrawnAt)
+        )
+      );
+
+    const now = new Date().toISOString();
+    for (const c of slotCommitments) {
+      const existingWhere = c.userId
+        ? and(eq(attendance.userId, c.userId), eq(attendance.eventId, params.id))
+        : and(eq(attendance.commitmentId, c.id), eq(attendance.eventId, params.id));
+      const [existing] = await db.select({ id: attendance.id }).from(attendance).where(existingWhere).limit(1);
+      if (existing) {
+        await db.update(attendance).set({ registered, markedAt: now }).where(eq(attendance.id, existing.id));
+      } else {
+        await db.insert(attendance).values({
+          userId: c.userId,
+          commitmentId: c.userId ? null : c.id,
+          eventId: params.id,
+          registered,
+          markedAt: now,
+        });
+      }
+    }
+    await db.update(events).set({ updatedAt: now }).where(eq(events.id, params.id));
+    return redirect(`/events/${params.id}/manage?tab=attendance`);
   }
 
   // ── Remove participant (organizer kicks a duplicate or wrong entry) ────────
@@ -614,19 +662,38 @@ export async function action(args: Route.ActionArgs) {
     const hostName = hostUser[0]?.fullName ?? "Event host";
     const baseUrl = new URL(request.url).origin;
 
-    const tpl = hostUpdateEmail(
-      event.title,
-      params.id,
-      updateSubject,
-      updateBody,
-      hostName,
-      baseUrl
-    );
+    // Build a name lookup map for personalization (signed-in users + guests)
+    const nameByEmail = new Map<string, string>();
+    const signedInForNames = await db
+      .select({ email: users.email, name: users.fullName })
+      .from(commitments)
+      .innerJoin(users, eq(users.id, commitments.userId))
+      .where(and(eq(commitments.eventId, params.id), isNull(commitments.withdrawnAt)));
+    for (const r of signedInForNames) nameByEmail.set(r.email, r.name);
+    const guestsForNames = await db
+      .select({ email: commitments.guestEmail, name: commitments.guestName })
+      .from(commitments)
+      .where(
+        and(eq(commitments.eventId, params.id), isNull(commitments.withdrawnAt), isNull(commitments.userId))
+      );
+    for (const r of guestsForNames) {
+      if (r.email) nameByEmail.set(r.email, r.name ?? "Guest");
+    }
 
     const results = await Promise.allSettled(
-      recipientEmails.map((to) =>
-        sendAndLog(env, db, params.id, "host_update", { to, ...tpl })
-      )
+      recipientEmails.map((to) => {
+        const recipientName = nameByEmail.get(to) ?? null;
+        const tpl = hostUpdateEmail(
+          event.title,
+          params.id,
+          updateSubject,
+          updateBody,
+          hostName,
+          baseUrl,
+          recipientName
+        );
+        return sendAndLog(env, db, params.id, "host_update", { to, ...tpl });
+      })
     );
 
     let sent = 0;
@@ -1044,13 +1111,31 @@ export default function ManageEvent() {
                     )}
                     {participants.length > 0 && (
                       <div className="manage-attendance">
-                        <p className="manage-attendance__label">
-                          Attendance — check participants who registered:
-                        </p>
+                        <div className="manage-attendance-header">
+                          <p className="manage-attendance__label">
+                            Attendance ({participants.filter((p) => p.isGuest ? (optimisticByCommitment[p.commitmentId] ?? false) : (optimisticByUser[p.userId!] ?? false)).length} / {participants.length} registered)
+                          </p>
+                          <div style={{ display: "flex", gap: "0.375rem" }}>
+                            <Form method="post">
+                              <input type="hidden" name="intent" value="mark_all_attendance" />
+                              <input type="hidden" name="slotId" value={slot.id} />
+                              <input type="hidden" name="registered" value="true" />
+                              <button type="submit" className="btn btn--ghost btn--xs manage-attendance-mark-all">
+                                All in
+                              </button>
+                            </Form>
+                            <Form method="post">
+                              <input type="hidden" name="intent" value="mark_all_attendance" />
+                              <input type="hidden" name="slotId" value={slot.id} />
+                              <input type="hidden" name="registered" value="false" />
+                              <button type="submit" className="btn btn--ghost btn--xs manage-attendance-mark-all">
+                                Clear all
+                              </button>
+                            </Form>
+                          </div>
+                        </div>
                         <ul className="manage-attendance-list">
                           {participants.map((p) => {
-                            // B5: Attendance toggle works for BOTH signed-in (keyed by userId)
-                            // and guests (keyed by commitmentId).
                             const checked = p.isGuest
                               ? (optimisticByCommitment[p.commitmentId] ?? false)
                               : (optimisticByUser[p.userId!] ?? false);
@@ -1063,37 +1148,17 @@ export default function ManageEvent() {
                                   method="post"
                                   className="manage-attendance-form"
                                 >
-                                  <input
-                                    type="hidden"
-                                    name="intent"
-                                    value="mark_attendance"
-                                  />
+                                  <input type="hidden" name="intent" value="mark_attendance" />
                                   {p.isGuest ? (
-                                    <input
-                                      type="hidden"
-                                      name="commitmentId"
-                                      value={p.commitmentId}
-                                    />
+                                    <input type="hidden" name="commitmentId" value={p.commitmentId} />
                                   ) : (
-                                    <input
-                                      type="hidden"
-                                      name="userId"
-                                      value={p.userId!}
-                                    />
+                                    <input type="hidden" name="userId" value={p.userId!} />
                                   )}
-                                  <input
-                                    type="hidden"
-                                    name="registered"
-                                    value={String(!checked)}
-                                  />
+                                  <input type="hidden" name="registered" value={String(!checked)} />
                                   <button
                                     type="submit"
                                     className={`manage-attendance-btn${checked ? " manage-attendance-btn--checked" : ""}`}
-                                    title={
-                                      checked
-                                        ? "Mark as not registered"
-                                        : "Mark as registered"
-                                    }
+                                    title={checked ? "Mark as not registered" : "Mark as registered"}
                                   >
                                     {checked ? "✓" : "○"}
                                   </button>
@@ -1102,6 +1167,11 @@ export default function ManageEvent() {
                                   {p.name}
                                   {p.isGuest && <span className="manage-participant-badge">guest</span>}
                                 </span>
+                                {p.email && (
+                                  <span style={{ fontSize: "0.75rem", color: "var(--color-muted)", marginLeft: "auto" }}>
+                                    {p.email}
+                                  </span>
+                                )}
                               </li>
                             );
                           })}

@@ -366,7 +366,7 @@ export async function action(args: Route.ActionArgs) {
         .set({ commitmentCount: newCount })
         .where(eq(timeSlots.id, slotId));
 
-      if ((slot.status as string) === "quorum_reached" && newCount < eventData.event.threshold) {
+      if (slot.status === "quorum_reached" && newCount < eventData.event.threshold) {
         await db.update(timeSlots).set({ status: "active" }).where(eq(timeSlots.id, slotId));
         const stillQuorum = await db
           .select({ id: timeSlots.id })
@@ -794,35 +794,77 @@ export default function EventDetail() {
               {/* Participant lists per slot — always visible */}
               {slots.some((s) => (bySlot[s.id]?.length ?? 0) > 0) && (
                 <div className="commit-participants-section">
-                  <h3>Who's committed</h3>
+                  <h3 className="commit-participants-section__title">Who's committed</h3>
                   {slots.map((slot) => {
                     const slotParticipants = bySlot[slot.id] ?? [];
                     if (slotParticipants.length === 0) return null;
+                    const maxAvatars = 8;
+                    const overflow = slotParticipants.length - maxAvatars;
                     return (
                       <div key={slot.id} className="commit-participants-slot">
-                        <p className="commit-participants-slot__label">
-                          {formatInTimezone(slot.startsAt, event.timezone, { weekday: "short", month: "short", day: "numeric" })}
-                          {" — "}{slotParticipants.length} committed
-                        </p>
+                        <div className="commit-participants-slot__header">
+                          <span className="commit-participants-slot__label">
+                            {formatInTimezone(slot.startsAt, event.timezone, {
+                              weekday: "short", month: "short", day: "numeric",
+                            })}
+                          </span>
+                          <span className={`badge badge--${slot.status}`}>
+                            {slotParticipants.length} {slotParticipants.length === 1 ? "person" : "people"}
+                          </span>
+                        </div>
+                        {/* Overlapping avatar stack */}
+                        <div className="participant-avatars" aria-hidden="true">
+                          {slotParticipants.slice(0, maxAvatars).map((p, i) => (
+                            <span key={i} className="participant-avatar-wrap" title={p.name}>
+                              {p.avatarUrl ? (
+                                <img src={p.avatarUrl} alt="" className="participant-avatar participant-avatar--img" referrerPolicy="no-referrer" />
+                              ) : (
+                                <span className="participant-avatar participant-avatar--initials">
+                                  {p.name[0]?.toUpperCase() ?? "?"}
+                                </span>
+                              )}
+                            </span>
+                          ))}
+                          {overflow > 0 && (
+                            <span className="participant-avatar participant-avatar--overflow">+{overflow}</span>
+                          )}
+                        </div>
+                        {/* Full name list */}
                         <ul className="participant-list">
                           {slotParticipants.map((p, i) => (
                             <li key={i} className="participant">
-                              {p.avatarUrl ? (
-                                <img src={p.avatarUrl} alt={p.name} className="participant__avatar" referrerPolicy="no-referrer" />
-                              ) : (
-                                <span className="participant__avatar participant__avatar--initials">{p.name[0]?.toUpperCase() ?? "?"}</span>
-                              )}
-                              {p.userId ? (
-                                <a href={`/users/${p.userId}`} className="participant__name">{p.name}</a>
-                              ) : (
-                                <span className="participant__name">{p.name}<span className="participant__guest-badge">guest</span></span>
-                              )}
-                              {p.reputationScore !== null && !p.isGuest && (
-                                <span className="participant__rep">{Math.round(Number(p.reputationScore))}%</span>
-                              )}
+                              <div className="participant__identity">
+                                {p.avatarUrl ? (
+                                  <img src={p.avatarUrl} alt="" className="participant__avatar" referrerPolicy="no-referrer" />
+                                ) : (
+                                  <span className="participant__avatar participant__avatar--initials">
+                                    {p.name[0]?.toUpperCase() ?? "?"}
+                                  </span>
+                                )}
+                                <div className="participant__info">
+                                  {p.userId ? (
+                                    <a href={`/users/${p.userId}`} className="participant__name">{p.name}</a>
+                                  ) : (
+                                    <span className="participant__name">
+                                      {p.name}
+                                      <span className="participant__guest-badge">guest</span>
+                                    </span>
+                                  )}
+                                  {p.reputationScore !== null && !p.isGuest && (
+                                    <span className="participant__rep" title="Shows up when they commit">
+                                      {Math.round(Number(p.reputationScore))}%
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
                               {p.isGuest && isOrganizer && (p.guestEmail || p.guestPhone) && (
-                                <span className="participant__email">
-                                  {[p.guestEmail, p.guestPhone].filter(Boolean).join(" · ")}
+                                <span className="participant__contact">
+                                  {p.guestEmail && (
+                                    <a href={`mailto:${p.guestEmail}`} className="participant__contact-link">{p.guestEmail}</a>
+                                  )}
+                                  {p.guestPhone && (
+                                    <a href={`tel:${p.guestPhone}`} className="participant__contact-link">{p.guestPhone}</a>
+                                  )}
                                 </span>
                               )}
                             </li>

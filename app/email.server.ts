@@ -248,18 +248,23 @@ export function eventExpiredParticipantEmail(
   return { subject, html, text };
 }
 
-/** Host ad-hoc update email (C3: Send Update) */
+/** Host ad-hoc update email (C3: Send Update). Optionally personalizes greeting. */
 export function hostUpdateEmail(
   eventTitle: string,
   eventId: string,
   subject: string,
   messageBody: string,
   hostName: string,
-  baseUrl: string
+  baseUrl: string,
+  recipientName?: string | null
 ): { subject: string; html: string; text: string } {
   const eventUrl = `${baseUrl}/events/${eventId}`;
+  const greeting = recipientName
+    ? `Hi ${escHtml(recipientName.split(" ")[0])},`
+    : `Hi there,`;
   const body = `
-    <h2 style="margin-top:0;color:${BRAND.text}">Update from ${escHtml(hostName)}</h2>
+    <p style="margin-top:0;margin-bottom:0.25rem;color:${BRAND.muted};font-size:14px">${greeting}</p>
+    <h2 style="margin-top:0.5rem;color:${BRAND.text}">Update from ${escHtml(hostName)}</h2>
     <div style="white-space:pre-line;line-height:1.6">${escHtml(messageBody)}</div>
     <p style="padding:12px 0">${ctaButton(eventUrl, "View Event")}</p>`;
   const html = emailShell({
@@ -267,7 +272,8 @@ export function hostUpdateEmail(
     body,
     footerText: `This message was sent by the event host via Quorum.`,
   });
-  const text = `Update from ${hostName} about "${eventTitle}":\n\n${messageBody}\n\nView event: ${eventUrl}`;
+  const textGreeting = recipientName ? `Hi ${recipientName.split(" ")[0]},\n\n` : "";
+  const text = `${textGreeting}Update from ${hostName} about "${eventTitle}":\n\n${messageBody}\n\nView event: ${eventUrl}`;
   return { subject, html, text };
 }
 
@@ -279,7 +285,8 @@ export function previewHostUpdateHtml(
   hostName: string
 ): string {
   const body = `
-    <h2 style="margin-top:0;color:${BRAND.text}">Update from ${escHtml(hostName)}</h2>
+    <p style="margin-top:0;margin-bottom:0.25rem;color:${BRAND.muted};font-size:14px">Hi there,</p>
+    <h2 style="margin-top:0.5rem;color:${BRAND.text}">Update from ${escHtml(hostName)}</h2>
     <div style="white-space:pre-line;line-height:1.6">${escHtml(messageBody || "(Your message will appear here)")}</div>
     <p style="padding:12px 0">${ctaButton("#", "View Event")}</p>`;
   return emailShell({

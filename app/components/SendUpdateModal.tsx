@@ -59,13 +59,8 @@ export function SendUpdateModal({
     setSelectedEmails(new Set());
   }
 
-  // Auto-close after successful send
-  useEffect(() => {
-    if (sent) {
-      const t = setTimeout(onClose, 2500);
-      return () => clearTimeout(t);
-    }
-  }, [sent, onClose]);
+  // No auto-close — let the host read the result and dismiss manually
+  // (auto-close at 2.5s was too fast and users missed failed emails)
 
   // Build preview HTML for iframe
   const previewHtml = showPreview
@@ -82,9 +77,23 @@ export function SendUpdateModal({
 
         {sent ? (
           <div className="send-update-success">
-            <p>Sent to {fetcher.data.sent} recipient{fetcher.data.sent !== 1 ? "s" : ""}
-              {fetcher.data.failed > 0 && ` (${fetcher.data.failed} failed)`}.
+            <p style={{ fontSize: "1.5rem", margin: "0 0 0.5rem" }}>
+              {fetcher.data.failed === 0 ? "✓" : "⚠"}
             </p>
+            <p>
+              Sent to <strong>{fetcher.data.sent}</strong> recipient{fetcher.data.sent !== 1 ? "s" : ""}.
+              {fetcher.data.failed > 0 && (
+                <> <span style={{ color: "#991b1b" }}>{fetcher.data.failed} failed — check Comms tab for details.</span></>
+              )}
+            </p>
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              style={{ marginTop: "1rem" }}
+              onClick={onClose}
+            >
+              Close
+            </button>
           </div>
         ) : (
           <fetcher.Form method="post" className="send-update-form">
@@ -132,7 +141,12 @@ export function SendUpdateModal({
 
             {/* Body */}
             <div className="send-update-section">
-              <label className="send-update-label" htmlFor="update-body">Message</label>
+              <label className="send-update-label" htmlFor="update-body">
+                Message
+                <span style={{ marginLeft: "auto", fontWeight: 400, color: "var(--color-muted)" }}>
+                  {body.length} chars
+                </span>
+              </label>
               <textarea
                 id="update-body"
                 name="body"
@@ -161,7 +175,7 @@ export function SendUpdateModal({
                     srcDoc={previewHtml}
                     title="Email preview"
                     className="send-update-preview__iframe"
-                    sandbox=""
+                    sandbox="allow-same-origin allow-popups"
                   />
                 </div>
               )}
@@ -209,7 +223,8 @@ function buildPreviewHtml(eventTitle: string, subject: string, body: string, hos
       </tr></table>
     </td></tr>
     <tr><td style="padding:28px 24px;color:#1e293b;font-size:15px;line-height:1.6">
-      <h2 style="margin-top:0;color:#1e293b">Update from ${escHtml(hostName)}</h2>
+      <p style="margin-top:0;margin-bottom:4px;color:#64748b;font-size:14px">Hi there,</p>
+      <h2 style="margin-top:8px;margin-bottom:12px;color:#1e293b">Update from ${escHtml(hostName)}</h2>
       <div style="white-space:pre-line">${escHtml(body || "(Your message here)")}</div>
     </td></tr>
     <tr><td style="padding:16px 24px;border-top:1px solid #ccfbf1;color:#64748b;font-size:12px">

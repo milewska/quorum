@@ -213,34 +213,50 @@ export function RespondentsTable({ respondents, eventId, timezone, slotOptions, 
 
       {/* ── Controls ── */}
       <div className="respondents-controls">
-        <input
-          type="search"
-          className="respondents-search"
-          placeholder="Search name, email, phone..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <select
-          className="respondents-filter"
-          value={filterSlot}
-          onChange={(e) => setFilterSlot(e.target.value)}
-        >
-          <option value="all">All slots</option>
-          {slotOptions.map((s) => (
-            <option key={s.id} value={s.id}>
-              {fmtShort(s.startsAt, timezone)}
-            </option>
-          ))}
-        </select>
-        <select
-          className="respondents-filter"
-          value={filterType}
-          onChange={(e) => setFilterType(e.target.value as typeof filterType)}
-        >
-          <option value="all">All types</option>
-          <option value="signed-in">Signed-in only</option>
-          <option value="guest">Guests only</option>
-        </select>
+        <div className="respondents-controls-row">
+          <input
+            type="search"
+            className="respondents-search"
+            placeholder="Search name, email, phone..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <select
+            className="respondents-filter"
+            value={filterSlot}
+            onChange={(e) => setFilterSlot(e.target.value)}
+          >
+            <option value="all">All slots</option>
+            {slotOptions.map((s) => (
+              <option key={s.id} value={s.id}>
+                {fmtShort(s.startsAt, timezone)}
+              </option>
+            ))}
+          </select>
+          <select
+            className="respondents-filter"
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value as typeof filterType)}
+          >
+            <option value="all">All types</option>
+            <option value="signed-in">Signed-in only</option>
+            <option value="guest">Guests only</option>
+          </select>
+          {(search || filterSlot !== "all" || filterType !== "all") && (
+            <button
+              type="button"
+              className="btn btn--ghost btn--xs"
+              onClick={() => { setSearch(""); setFilterSlot("all"); setFilterType("all"); }}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        {(search || filterSlot !== "all" || filterType !== "all") && (
+          <p className="respondents-filter-count">
+            Showing {filtered.length} of {respondents.length}
+          </p>
+        )}
       </div>
 
       {/* ── Table ── */}
@@ -328,16 +344,18 @@ export function RespondentsTable({ respondents, eventId, timezone, slotOptions, 
 
                   {/* Contact */}
                   <td className="respondents-td respondents-td--contact">
-                    {r.email && (
-                      <a href={`mailto:${r.email}`} className="respondents-contact-link" title={r.email}>
-                        {r.email}
-                      </a>
-                    )}
-                    {r.phone && (
-                      <a href={`tel:${r.phone}`} className="respondents-contact-link respondents-contact-link--phone">
-                        {r.phone}
-                      </a>
-                    )}
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.125rem" }}>
+                      {r.email && (
+                        <a href={`mailto:${r.email}`} className="respondents-contact-link" title={r.email}>
+                          {r.email.length > 28 ? r.email.slice(0, 26) + "…" : r.email}
+                        </a>
+                      )}
+                      {r.phone && (
+                        <a href={`tel:${r.phone}`} className="respondents-contact-link respondents-contact-link--phone">
+                          {r.phone}
+                        </a>
+                      )}
+                    </div>
                   </td>
 
                   {/* Slots */}
