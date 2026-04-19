@@ -11,7 +11,7 @@ import type { CostTier } from "~/components/CostTierEditor";
 import { formatInTimezone, formatTimeOnly, tzAbbreviation } from "~/components/TimezonePicker";
 // No auto-emails on quorum REACHED. Host confirms via manage page.
 // But DO notify host when a withdraw drops a slot BELOW quorum (B4).
-import { sendMail, slotLostQuorumOrganizerEmail } from "~/email.server";
+import { sendAndLog, slotLostQuorumOrganizerEmail } from "~/email.server";
 import { expireOverdueEvents } from "~/expiry.server";
 
 // ─── SEO Meta (Open Graph + Twitter Cards) ───────────────────────────────────
@@ -398,7 +398,7 @@ export async function action(args: Route.ActionArgs) {
             eventData.event.threshold,
             baseUrl
           );
-          await sendMail(env, { to: eventData.organizerEmail, ...tpl });
+          await sendAndLog(env, db, params.id, "slot_lost_quorum", { to: eventData.organizerEmail, ...tpl });
         } catch (e) {
           console.error("Slot-lost-quorum notification failed:", e);
         }
